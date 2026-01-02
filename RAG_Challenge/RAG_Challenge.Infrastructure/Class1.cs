@@ -9,14 +9,14 @@ namespace RAG_Challenge.Infrastructure;
 
 public sealed class ExternalApiAOptions
 {
-    public const string SectionName = "ExternalApis:ApiA";
+    public const string SectionName = "ExternalApis:OpenAI";
     public string BaseUrl { get; init; } = string.Empty;
     public string ApiKey { get; init; } = string.Empty;
 }
 
 public sealed class ExternalApiBOptions
 {
-    public const string SectionName = "ExternalApis:ApiB";
+    public const string SectionName = "ExternalApis:VectorDb";
     public string BaseUrl { get; init; } = string.Empty;
     public string ApiKey { get; init; } = string.Empty;
 }
@@ -68,7 +68,7 @@ internal sealed class ExternalApiBClient(HttpClient httpClient, IOptions<Externa
         }
 
         var items = await response.Content.ReadFromJsonAsync<List<ExternalApiBResponse>>(cancellationToken: cancellationToken);
-        return items ?? new List<ExternalApiBResponse>();
+        return items ?? [];
     }
 }
 
