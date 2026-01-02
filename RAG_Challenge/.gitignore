@@ -1,0 +1,96 @@
+# Build results
+bin/
+obj/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Bb]uild[Ll]og.*
+*.log
+*.tlog
+*.lastbuildstate
+*.cache
+*.db
+*.svclog
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.userprefs
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Resharper / Rider
+_ReSharper.Caches/
+
+# ASP.NET
+appsettings.*.local.json
+
+# Logs
+*.log
+*.trace
+
+# Coverage
+*.coverage
+*.coveragexml
+coverage*
+TestResult*
+
+# Publish outputs
+*.publish.xml
+**/wwwroot/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Docker
+**/obj/Docker/publish/
+**/obj/Docker/assembly/
+
+# Rider user-specific
+.idea/.idea.Workspace
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/usage.statistics.xml
+.idea/**/dictionaries
+.idea/**/shelf
+.idea/**/contentModel.xml
+.idea/**/modules.xml
+.idea/**/projectModel.xml
+.idea/**/misc.xml
+.idea/**/vcs.xml
+.idea/**/encodings.xml
+.idea/**/webServers.xml
+.idea/**/jsLibraryMappings.xml
+.idea/**/dataSources.ids
+.idea/**/dataSources.local.xml
+.idea/**/sqlDataSources.xml
+.idea/**/dynamic.xml
+.idea/**/indexLayout.xml
+.idea/**/uiDesigner.xml
+.idea/**/gradle.xml
+.idea/**/libraries
+.idea/**/out
+
+# Temporary
+*.tmp
+*.temp
+~$*
+
