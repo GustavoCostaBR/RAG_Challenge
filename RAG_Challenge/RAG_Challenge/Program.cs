@@ -43,9 +43,9 @@ app.MapPost("/external/a/embeddings", async (EmbeddingRequest request, IOpenAiCl
     return embedding is null ? Results.Problem("Embedding request failed", statusCode: 502) : Results.Ok(embedding);
 }).WithName("CreateEmbedding");
 
-app.MapPost("/rag/ask", async (string question, IRagOrchestrator orchestrator, CancellationToken ct) =>
+app.MapPost("/rag/ask", async (RagRequest request, IRagOrchestrator orchestrator, CancellationToken ct) =>
 {
-    var result = await orchestrator.GenerateAnswerAsync(question, ct);
+    var result = await orchestrator.GenerateAnswerAsync(request, ct);
     return Results.Ok(result);
 }).WithName("RagAsk");
 

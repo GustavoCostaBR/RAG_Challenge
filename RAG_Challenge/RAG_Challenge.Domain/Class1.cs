@@ -38,10 +38,12 @@ public interface IWeatherService
 
 public interface IRagOrchestrator
 {
-    Task<ChatOrchestrationResult> GenerateAnswerAsync(string question, CancellationToken cancellationToken = default);
+    Task<ChatOrchestrationResult> GenerateAnswerAsync(RagRequest request, CancellationToken cancellationToken = default);
 }
 
 public record ChatOrchestrationResult(string Answer, EmbeddingResponse? Embedding, IReadOnlyList<VectorDbSearchResult> RetrievedChunks, ChatCompletionResponse? Completion);
+
+public record RagRequest(string Question, IReadOnlyList<ChatMessage> History);
 
 public record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 {

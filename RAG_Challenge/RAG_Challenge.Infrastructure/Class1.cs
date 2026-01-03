@@ -158,8 +158,10 @@ internal sealed class RagOrchestrator(IOpenAiClient openAi, IVectorDbClient vect
     private readonly IVectorDbClient _vectorDb = vectorDb;
     private readonly ILogger<RagOrchestrator> _logger = logger;
 
-    public async Task<ChatOrchestrationResult> GenerateAnswerAsync(string question, CancellationToken cancellationToken = default)
+    public async Task<ChatOrchestrationResult> GenerateAnswerAsync(RagRequest request, CancellationToken cancellationToken = default)
     {
+        var question = request.Question;
+
         // Step 1: embed question
         var embedding = await _openAi.CreateEmbeddingAsync(question, cancellationToken);
         if (embedding?.Data.FirstOrDefault()?.Embedding is not { } vector)
@@ -168,7 +170,7 @@ internal sealed class RagOrchestrator(IOpenAiClient openAi, IVectorDbClient vect
             return new ChatOrchestrationResult("Embedding failed", embedding, Array.Empty<VectorDbSearchResult>(), null);
         }
 
-        // Step 2: search vector DB (Azure AI Search style)
+        // Step 2: search vector DB
         var vectorQuery = new VectorQuery(vector.ToArray(), 3, "embeddings");
         var searchRequest = new VectorSearchRequest(
             Count: true,
@@ -180,13 +182,20 @@ internal sealed class RagOrchestrator(IOpenAiClient openAi, IVectorDbClient vect
 
         var retrieved = await _vectorDb.SearchAsync(searchRequest, cancellationToken);
 
-        // Step 3: build chat with context (placeholder system+user/messages; can enrich later)
-        var system = new ChatMessage("system", "You are a helpful assistant. Use the provided context to answer succinctly.");
+        // Step 3: build chat with context and prior history
+        var history = request.History ?? Array.Empty<ChatMessage>();
         var contextChunk = string.Join("\n\n", retrieved.Select(r => $"[{r.Type}] {r.Content}"));
-        var user = new ChatMessage("user", $"Question: {question}\n\nContext:\n{contextChunk}");
-        var chat = await _openAi.CreateChatCompletionAsync([system, user], cancellationToken);
 
+        var system = new ChatMessage("system", "You are a helpful assistant. Use the provided context to answer succinctly.");
+        var user = new ChatMessage("user", $"Question: {question}\n\nContext:\n{contextChunk}");
+
+        var messages = new List<ChatMessage> { system };
+        messages.AddRange(history);
+        messages.Add(user);
+
+        var chat = await _openAi.CreateChatCompletionAsync(messages, cancellationToken);
         var answer = chat?.Choices.FirstOrDefault()?.Message.Content ?? "No answer";
+
         return new ChatOrchestrationResult(answer, embedding, retrieved, chat);
     }
 }
