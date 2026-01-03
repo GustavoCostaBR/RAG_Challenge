@@ -8,4 +8,5 @@ public record ChatOrchestrationResult(
     string Answer,
     EmbeddingResponse? Embedding,
     IReadOnlyList<VectorDbSearchResult> RetrievedChunks,
-    ChatCompletionResponse? Completion);
+    ChatCompletionResponse? Completion,
+    IReadOnlyList<ChatMessage> History);
