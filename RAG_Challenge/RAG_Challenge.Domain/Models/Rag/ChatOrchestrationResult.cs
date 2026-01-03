@@ -9,4 +9,5 @@ public record ChatOrchestrationResult(
     EmbeddingResponse? Embedding,
     IReadOnlyList<VectorDbSearchResult> RetrievedChunks,
     ChatCompletionResponse? Completion,
-    IReadOnlyList<ChatMessage> History);
+    IReadOnlyList<ChatMessage> History,
+    bool HandoverToHumanNeeded);
