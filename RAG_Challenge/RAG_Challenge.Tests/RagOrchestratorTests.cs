@@ -21,9 +21,9 @@ namespace RAG_Challenge.Tests;
 
 public class RagOrchestratorTests
 {
-    private const string OpenAiApiKey = "PLACEHOLDER";
+    private const string OpenAiApiKey = "PlaceHolder";
 
-    private const string VectorDbApiKey = "PLACEHOLDER";
+    private const string VectorDbApiKey = "PlaceHolder";
 
     private readonly Mock<IOpenAiClient> _openAiMock;
     private readonly Mock<IVectorDbClient> _vectorDbMock;
@@ -35,7 +35,11 @@ public class RagOrchestratorTests
         _openAiMock = new Mock<IOpenAiClient>();
         _vectorDbMock = new Mock<IVectorDbClient>();
         _loggerMock = new Mock<ILogger<RagOrchestrator>>();
-        _orchestrator = new RagOrchestrator(_openAiMock.Object, _vectorDbMock.Object, _loggerMock.Object);
+
+        _orchestrator = new RagOrchestrator(
+            _openAiMock.Object,
+            _vectorDbMock.Object,
+            _loggerMock.Object);
     }
 
     [Fact]
@@ -77,7 +81,8 @@ public class RagOrchestratorTests
         // Mock Final Answer
         var answerJson = "{\"answer\": \"Tesla is a car company.\", \"handoverToHumanNeeded\": false}";
         _openAiMock.Setup(x => x.CreateChatCompletionAsync(
-                It.Is<IReadOnlyList<ChatMessage>>(m => m.Any(msg => msg.Content.Contains("You are a helpful assistant"))),
+                It.Is<IReadOnlyList<ChatMessage>>(m =>
+                    m.Any(msg => msg.Content.Contains("You are a helpful assistant"))),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<ChatCompletionResponse>.Success(new ChatCompletionResponse(
                 "chatcmpl-124",
@@ -104,7 +109,7 @@ public class RagOrchestratorTests
             BaseUrl = "https://api.openai.com/v1/",
             ApiKey = OpenAiApiKey
         });
-        
+
         var vectorDbOptions = Options.Create(new VectorDbOptions
         {
             BaseUrl = "https://claudia-db.search.windows.net/",
@@ -116,11 +121,16 @@ public class RagOrchestratorTests
         var openAiHttpClient = new HttpClient { BaseAddress = new Uri(openAiOptions.Value.BaseUrl) };
         var vectorDbHttpClient = new HttpClient { BaseAddress = new Uri(vectorDbOptions.Value.BaseUrl) };
 
-        var openAiClient = new OpenAiHttpClient(openAiHttpClient, openAiOptions, new Mock<ILogger<OpenAiHttpClient>>().Object);
-        var vectorDbClient = new VectorDbHttpClient(vectorDbHttpClient, vectorDbOptions, new Mock<ILogger<VectorDbHttpClient>>().Object);
+        var openAiClient =
+            new OpenAiHttpClient(openAiHttpClient, openAiOptions, new Mock<ILogger<OpenAiHttpClient>>().Object);
+        var vectorDbClient = new VectorDbHttpClient(vectorDbHttpClient, vectorDbOptions,
+            new Mock<ILogger<VectorDbHttpClient>>().Object);
 
-        var orchestrator = new RagOrchestrator(openAiClient, vectorDbClient, _loggerMock.Object);
-        
+        var orchestrator = new RagOrchestrator(
+            openAiClient,
+            vectorDbClient,
+            _loggerMock.Object);
+
         var question = "What is a Tesla?";
         var request = new RagRequest(question, [], Projects.TeslaMotorsId);
 
@@ -133,11 +143,12 @@ public class RagOrchestratorTests
     }
 
     [Fact]
-    public async Task GenerateAnswerAsync_EscalatesToHuman_WhenQuestionIsNotAnswerableAndClarificationLimitReached_Mocked()
+    public async Task
+        GenerateAnswerAsync_EscalatesToHuman_WhenQuestionIsNotAnswerableAndClarificationLimitReached_Mocked()
     {
         // Arrange
         var question = "What is the capital of France?";
-        
+
         // Mock Embedding
         var embedding = new EmbeddingResponse(
             "list",
@@ -171,7 +182,7 @@ public class RagOrchestratorTests
         // Step 1: First call
         var request1 = new RagRequest(question, [], Projects.TeslaMotorsId);
         var result1 = await _orchestrator.GenerateAnswerAsync(request1);
-        
+
         Assert.Contains("[clarification]", result1.Answer);
         Assert.False(result1.HandoverToHumanNeeded);
 
@@ -204,7 +215,8 @@ public class RagOrchestratorTests
     }
 
     [Fact]
-    public async Task GenerateAnswerAsync_EscalatesToHuman_WhenQuestionIsNotAnswerableAndClarificationLimitReached_RealFlow()
+    public async Task
+        GenerateAnswerAsync_EscalatesToHuman_WhenQuestionIsNotAnswerableAndClarificationLimitReached_RealFlow()
     {
         // Arrange
         var openAiOptions = Options.Create(new OpenAiOptions
@@ -212,7 +224,7 @@ public class RagOrchestratorTests
             BaseUrl = "https://api.openai.com/v1/",
             ApiKey = OpenAiApiKey
         });
-        
+
         var vectorDbOptions = Options.Create(new VectorDbOptions
         {
             BaseUrl = "https://claudia-db.search.windows.net/",
@@ -224,17 +236,22 @@ public class RagOrchestratorTests
         var openAiHttpClient = new HttpClient { BaseAddress = new Uri(openAiOptions.Value.BaseUrl) };
         var vectorDbHttpClient = new HttpClient { BaseAddress = new Uri(vectorDbOptions.Value.BaseUrl) };
 
-        var openAiClient = new OpenAiHttpClient(openAiHttpClient, openAiOptions, new Mock<ILogger<OpenAiHttpClient>>().Object);
-        var vectorDbClient = new VectorDbHttpClient(vectorDbHttpClient, vectorDbOptions, new Mock<ILogger<VectorDbHttpClient>>().Object);
+        var openAiClient =
+            new OpenAiHttpClient(openAiHttpClient, openAiOptions, new Mock<ILogger<OpenAiHttpClient>>().Object);
+        var vectorDbClient = new VectorDbHttpClient(vectorDbHttpClient, vectorDbOptions,
+            new Mock<ILogger<VectorDbHttpClient>>().Object);
 
-        var orchestrator = new RagOrchestrator(openAiClient, vectorDbClient, _loggerMock.Object);
-        
+        var orchestrator = new RagOrchestrator(
+            openAiClient,
+            vectorDbClient,
+            _loggerMock.Object);
+
         var question = "What is the capital of France?";
 
         // Step 1: First call
         var request1 = new RagRequest(question, [], Projects.TeslaMotorsId);
         var result1 = await orchestrator.GenerateAnswerAsync(request1);
-        
+
         // Assert.Contains("[clarification]", result1.Answer); // Depending on real response
         Assert.False(result1.HandoverToHumanNeeded);
 
@@ -263,4 +280,3 @@ public class RagOrchestratorTests
         Assert.True(result3.HandoverToHumanNeeded);
     }
 }
-

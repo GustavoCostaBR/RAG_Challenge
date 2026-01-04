@@ -15,9 +15,7 @@ internal sealed class OpenAiHttpClient(
     IOptions<OpenAiOptions> options,
     ILogger<OpenAiHttpClient> logger) : IOpenAiClient
 {
-    private readonly HttpClient _httpClient = httpClient;
     private readonly OpenAiOptions _options = options.Value;
-    private readonly ILogger<OpenAiHttpClient> _logger = logger;
     private const string EmbeddingsPath = "embeddings";
     private const string ChatCompletionsPath = "chat/completions";
     private const string EmbeddingModel = "text-embedding-3-large";
@@ -37,10 +35,10 @@ internal sealed class OpenAiHttpClient(
                 new AuthenticationHeaderValue("Bearer", _options.ApiKey);
         }
 
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        var response = await httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("OpenAI embeddings call failed with status {StatusCode}", response.StatusCode);
+            logger.LogWarning("OpenAI embeddings call failed with status {StatusCode}", response.StatusCode);
             return Result<EmbeddingResponse>.Failure(
                 $"OpenAI embeddings call failed with status {response.StatusCode}");
         }
@@ -67,10 +65,10 @@ internal sealed class OpenAiHttpClient(
                 new AuthenticationHeaderValue("Bearer", _options.ApiKey);
         }
 
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        var response = await httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogWarning("OpenAI chat completion failed with status {StatusCode}", response.StatusCode);
+            logger.LogWarning("OpenAI chat completion failed with status {StatusCode}", response.StatusCode);
             return Result<ChatCompletionResponse>.Failure(
                 $"OpenAI chat completion failed with status {response.StatusCode}");
         }
