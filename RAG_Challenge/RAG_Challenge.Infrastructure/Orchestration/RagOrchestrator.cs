@@ -1,118 +1,228 @@
 using System.Globalization;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using RAG_Challenge.Domain.Constants;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Domain.Models.Chat;
 using RAG_Challenge.Domain.Models.Embeddings;
 using RAG_Challenge.Domain.Models.Rag;
 using RAG_Challenge.Domain.Models.VectorSearch;
+using RAG_Challenge.Infrastructure.Helpers;
 
 namespace RAG_Challenge.Infrastructure.Orchestration;
 
-internal sealed class RagOrchestrator(IOpenAiClient openAi, IVectorDbClient vectorDb, ILogger<RagOrchestrator> logger)
+internal sealed class RagOrchestrator(
+    IOpenAiClient openAi,
+    IVectorDbClient vectorDb,
+    ILogger<RagOrchestrator> logger)
     : IRagOrchestrator
 {
-    private readonly IOpenAiClient _openAi = openAi;
-    private readonly IVectorDbClient _vectorDb = vectorDb;
-    private readonly ILogger<RagOrchestrator> _logger = logger;
-    private const int MaxClarifications = 2;
     private const string ClarificationTag = "[clarification]";
-
-    private const string CoverageJudgeSystemPrompt =
-        "You are a coverage judge. Decide if the internal information is sufficient to answer the question. " +
-        "Respond in one line. If sufficient, reply: YES. If insufficient, reply: NO: <Say to the user you did not find the info in your internal search and ask for clarification, pointing what is the info you could not find related to his question, ask if he can rephrase>. ";
 
     public async Task<ChatOrchestrationResult> GenerateAnswerAsync(RagRequest request,
         CancellationToken cancellationToken = default)
     {
-        var embedding = await _openAi.CreateEmbeddingAsync(request.Question, cancellationToken);
+        var projectId = request.ProjectId ?? Guid.Empty;
+        var projectFilterResult = Projects.ToFilterValue(projectId);
+
+        if (!projectFilterResult.IsSuccess)
+        {
+            return new ChatOrchestrationResult(
+                "Invalid project ID.",
+                null,
+                [],
+                null,
+                [],
+                false,
+                projectFilterResult.Status);
+        }
+
+        var embeddingResult = await openAi.CreateEmbeddingAsync(request.Question, cancellationToken);
+        if (!embeddingResult.IsSuccess)
+        {
+            logger.LogWarning("Embedding generation failed: {ErrorMessage}", embeddingResult.Status.ErrorMessage);
+            return new ChatOrchestrationResult(
+                "Embedding failed",
+                null,
+                [],
+                null,
+                [],
+                false,
+                embeddingResult.Status);
+        }
+
+        var embedding = embeddingResult.Value;
         var firstEmbedding = embedding is { Data.Count: > 0 } ? embedding.Data[0].Embedding : null;
         if (firstEmbedding is null)
         {
-            _logger.LogWarning("Embedding generation failed");
-            return new ChatOrchestrationResult("Embedding failed", embedding, [], null, [], false);
+            logger.LogWarning("Embedding generation failed: No embedding data returned");
+            return new ChatOrchestrationResult(
+                "Embedding failed",
+                embedding,
+                [],
+                null,
+                [],
+                false,
+                Status.Error("No embedding data returned"));
         }
 
         var vectorQuery = new VectorQuery(firstEmbedding.ToArray(), 3, "embeddings");
-        var searchRequest = new VectorSearchRequest(
-            Count: true,
-            Select: "content,type",
-            Top: 10,
-            Filter: "projectName eq 'tesla_motors'",
-            VectorQueries: [vectorQuery]
-        );
+        var searchRequestResult = VectorSearchBuilder.Build(vectorQuery, request.ProjectId);
 
-        var retrieved = await _vectorDb.SearchAsync(searchRequest, cancellationToken);
+        if (!searchRequestResult.IsSuccess)
+        {
+            return new ChatOrchestrationResult(
+                Answer: "Invalid project ID.",
+                Embedding: embedding,
+                RetrievedChunks: [],
+                Completion: null,
+                History: request.History,
+                HandoverToHumanNeeded: false,
+                Status: searchRequestResult.Status);
+        }
 
-        var history = request.History;
-        var contextChunk = string.Join("\n\n", retrieved.Select(r => $"[{r.Type}] {r.Content}"));
-        var allN2 = retrieved.Count > 0 &&
-                    retrieved.All(r => string.Equals(r.Type, "N2", StringComparison.OrdinalIgnoreCase));
-        var (judgeClarify, judgePrompt) =
+        var retrievedContext = await vectorDb.SearchAsync(searchRequestResult.Value!, cancellationToken);
+
+        var chatHistory = request.History;
+
+        var contextChunk = GetContextChunkString(retrievedContext);
+
+        if (RagHeuristicsHelper.IsAllRetrievedContextLabelledN2(retrievedContext))
+        {
+            return ReturnEscalationAnswer(
+                request,
+                chatHistory,
+                embedding,
+                retrievedContext,
+                true);
+        }
+
+        var coverageEvaluationResult =
             await EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
 
-        var system = new ChatMessage("system",
-            "You are a helpful assistant. Use only the provided context (no external knowledge). Respond in JSON as {\"answer\":\"...\",\"handoverToHumanNeeded\":false}. If any content you rely on is labeled N2 (only if you used it for the answer), set handoverToHumanNeeded to true. Keep answer concise.");
+        if (!coverageEvaluationResult.IsSuccess)
+        {
+            return new ChatOrchestrationResult(
+                Answer: "An internal error occurred.",
+                Embedding: embedding,
+                RetrievedChunks: retrievedContext,
+                Completion: null,
+                History: chatHistory,
+                HandoverToHumanNeeded: true,
+                Status: coverageEvaluationResult.Status);
+        }
+
+        var (judgeClarify, judgePrompt) = coverageEvaluationResult.Value;
+
+        var system = new ChatMessage(RoleConstants.SystemRole, RagPrompts.SystemPrompt);
 
         var messages = new List<ChatMessage> { system };
-        messages.AddRange(history);
-        var userWithContext = new ChatMessage("user", $"Question: {request.Question}\n\nContext:\n{contextChunk}");
+        messages.AddRange(chatHistory);
+
+        var userWithContext = new ChatMessage(RoleConstants.UserRole,
+            $"Question: {request.Question}\n\nContext:\n{contextChunk}");
+
         messages.Add(userWithContext);
 
         // Clarification bookkeeping
-        var clarificationsSoFar = history.Count(m =>
-            m.Role == "assistant" && m.Content.Contains(ClarificationTag, StringComparison.OrdinalIgnoreCase));
-        var heuristicClarify = ShouldClarify(retrieved);
+        var clarificationsSoFar = RagHeuristicsHelper.GetHistoryClarificationsCount(chatHistory);
+        var heuristicClarify = RagHeuristicsHelper.ShouldClarify(retrievedContext);
         var needClarification = heuristicClarify || judgeClarify;
-        var handover = false;
+        var handoverToHuman = false;
 
-        switch (needClarification)
+        if (!needClarification)
         {
-            case true when clarificationsSoFar >= MaxClarifications:
-            {
-                // Exceeded clarification budget
-                handover = true;
-                return ReturnEscalationAnswer(request, history, embedding, retrieved, handover);
-            }
-
-            case true:
-            {
-                var reasonText = string.IsNullOrWhiteSpace(judgePrompt)
-                    ? "I couldn't find enough information in my internal search. Could you clarify what you'd like to know?"
-                    : $"{judgePrompt}";
-                var clarificationPrompt = ClarificationTag + " " + reasonText;
-
-                var returnedHistoryClarify = new List<ChatMessage>(history)
-                {
-                    new("user", request.Question),
-                    new("assistant", clarificationPrompt)
-                };
-                return new ChatOrchestrationResult(clarificationPrompt, embedding, retrieved, null,
-                    returnedHistoryClarify,
-                    handover);
-            }
+            return await GetAnswer(
+                request,
+                messages,
+                chatHistory,
+                embedding,
+                retrievedContext,
+                cancellationToken);
         }
 
-        // Proceed to answer
-        var chat = await _openAi.CreateChatCompletionAsync(messages, cancellationToken);
+        if (RagHeuristicsHelper.HasExceededClarificationLimit(clarificationsSoFar))
+        {
+            // Exceeded clarification budget
+            handoverToHuman = true;
+            return ReturnEscalationAnswer(request, chatHistory, embedding, retrievedContext, handoverToHuman);
+        }
+
+        var clarificationPrompt = ClarificationTag + " " + judgePrompt;
+
+        var returnedHistoryClarify = new List<ChatMessage>(chatHistory)
+        {
+            new(RoleConstants.UserRole, request.Question),
+            new(RoleConstants.AssistantRole, clarificationPrompt)
+        };
+        return new ChatOrchestrationResult(
+            clarificationPrompt,
+            embedding,
+            retrievedContext,
+            null,
+            returnedHistoryClarify,
+            handoverToHuman, 
+            Status.Ok());
+    }
+
+    private static string GetContextChunkString(IReadOnlyList<VectorDbSearchResult> context)
+    {
+        return string.Join("\n\n", context.Select(r => $"[{r.Type}] {r.Content}"));
+    }
+
+    private async Task<ChatOrchestrationResult> GetAnswer(
+        RagRequest request,
+        List<ChatMessage> messages,
+        IReadOnlyList<ChatMessage> chatHistory,
+        EmbeddingResponse? embedding,
+        IReadOnlyList<VectorDbSearchResult> retrievedContext,
+        CancellationToken cancellationToken)
+    {
+        var chatResult = await openAi.CreateChatCompletionAsync(messages, cancellationToken);
+        if (!chatResult.IsSuccess)
+        {
+            return new ChatOrchestrationResult(
+                Answer: "Failed to get chat completion.",
+                Embedding: embedding,
+                RetrievedChunks: retrievedContext,
+                Completion: null,
+                History: chatHistory,
+                HandoverToHumanNeeded: true,
+                Status: chatResult.Status);
+        }
+
+        var chat = chatResult.Value;
         var firstChoice = chat is { Choices.Count: > 0 } ? chat.Choices[0] : null;
         var rawContent = firstChoice?.Message.Content;
-        var (parsedAnswer, parsedHandover) = TryParseModelResponse(rawContent);
-        var answer = parsedAnswer ?? rawContent ?? "No answer";
 
-        if (parsedHandover == true)
+        var parseResult = ModelResponseParser.ParseModelResponse(rawContent);
+
+        if (!parseResult.IsSuccess)
         {
-            return ReturnEscalationAnswer(request, history, embedding, retrieved, true);
+            return new ChatOrchestrationResult(
+                Answer: "Failed to parse model response.",
+                Embedding: embedding,
+                RetrievedChunks: retrievedContext,
+                Completion: chat,
+                History: chatHistory,
+                HandoverToHumanNeeded: true,
+                Status: parseResult.Status);
         }
 
-        var returnedHistory = new List<ChatMessage>(history)
+        var (answer, parsedHandoverToHuman) = parseResult.Value;
+
+        if (parsedHandoverToHuman)
         {
-            new("user", request.Question),
-            new("assistant", answer)
+            return ReturnEscalationAnswer(request, chatHistory, embedding, retrievedContext, true);
+        }
+
+        var returnedHistory = new List<ChatMessage>(chatHistory)
+        {
+            new(RoleConstants.UserRole, request.Question),
+            new(RoleConstants.AssistantRole, answer)
         };
 
-        var finalHandover = handover || allN2 || parsedHandover == true;
-        return new ChatOrchestrationResult(answer, embedding, retrieved, chat, returnedHistory, finalHandover);
+        return new ChatOrchestrationResult(answer, embedding, retrievedContext, chat, returnedHistory,
+            parsedHandoverToHuman, Status.Ok());
     }
 
     private static ChatOrchestrationResult ReturnEscalationAnswer(
@@ -120,100 +230,67 @@ internal sealed class RagOrchestrator(IOpenAiClient openAi, IVectorDbClient vect
         IReadOnlyList<ChatMessage> history,
         EmbeddingResponse? embedding,
         IReadOnlyList<VectorDbSearchResult> retrieved,
-        bool handover)
+        bool handoverToHuman)
     {
         const string escalationAnswer = "I need to hand this over to a human specialist for further assistance.";
         var returnedHistoryEscalate = new List<ChatMessage>(history)
         {
-            new("user", request.Question),
-            new("assistant", escalationAnswer)
+            new(RoleConstants.UserRole, request.Question),
+            new(RoleConstants.AssistantRole, escalationAnswer)
         };
         return new ChatOrchestrationResult(escalationAnswer, embedding, retrieved, null, returnedHistoryEscalate,
-            handover);
+            handoverToHuman, Status.Ok());
     }
 
-    private static bool ShouldClarify(IReadOnlyList<VectorDbSearchResult> retrieved)
-    {
-        if (retrieved.Count == 0)
-        {
-            return true;
-        }
-
-        var topScore = retrieved[0].Score ?? 0;
-        var avgTop3 = retrieved.Take(Math.Min(3, retrieved.Count)).Average(r => r.Score ?? 0);
-
-        // Hybrid heuristic: low top score OR low average => clarify
-        return topScore < 0.35 || avgTop3 < 0.30;
-    }
-
-    private async Task<(bool needClarification, string? clarificationPrompt)> EvaluateCoverageAsync(
+    private async Task<Result<(bool NeedClarification, string? ClarificationPrompt)>> EvaluateCoverageAsync(
         string question,
         string context,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(context))
         {
-            return (true, null);
+            return Result<(bool, string?)>.Failure("No context retrieved from Vector DB");
         }
 
         var judgeMessages = new List<ChatMessage>
         {
-            new("system", CoverageJudgeSystemPrompt),
-            new("user", $"Question: {question}\n\nContext:\n{context}")
+            new(RoleConstants.SystemRole, RagPrompts.CoverageJudgeSystemPrompt),
+            new(RoleConstants.UserRole, $"Question: {question}\n\nContext:\n{context}")
         };
 
-        var judgeResult = await _openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken);
+        var judgeResult = await openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken);
 
-        var firstResult = judgeResult is { Choices.Count: > 0 } ? judgeResult.Choices[0] : null;
+        if (!judgeResult.IsSuccess)
+        {
+            return Result<(bool, string?)>.Failure(judgeResult.Status);
+        }
+
+        var chatResponse = judgeResult.Value;
+        var firstResult = chatResponse is { Choices.Count: > 0 } ? chatResponse.Choices[0] : null;
 
         var judgeText = firstResult?.Message.Content;
+
         if (string.IsNullOrWhiteSpace(judgeText))
         {
-            return (false, null);
+            return Result<(bool, string?)>.Failure("No response from Coverage Judge");
         }
 
         judgeText = judgeText.Trim();
-        if (judgeText.StartsWith("YES", true, CultureInfo.InvariantCulture))
-        {
-            return (false, null);
-        }
 
         if (judgeText.StartsWith("NO", true, CultureInfo.InvariantCulture))
         {
             var clarification = judgeText.Length > 2 ? judgeText[2..].TrimStart(':', ' ', '\t') : null;
-            return (true, string.IsNullOrWhiteSpace(clarification) ? null : clarification);
+
+            return string.IsNullOrWhiteSpace(clarification)
+                ? Result<(bool, string?)>.Failure("Coverage Judge returned NO but provided no clarification")
+                : Result<(bool, string?)>.Success((true, clarification));
         }
 
-        // Default: do not force clarification if judge is unclear
-        return (false, null);
-    }
-
-    private static (string? answer, bool? handoverToHumanNeeded) TryParseModelResponse(string? content)
-    {
-        if (string.IsNullOrWhiteSpace(content)) return (null, null);
-        try
+        if (judgeText.StartsWith("YES", true, CultureInfo.InvariantCulture))
         {
-            using var doc = JsonDocument.Parse(content);
-            var root = doc.RootElement;
-            var ans = root.TryGetProperty("answer", out var a) && a.ValueKind == JsonValueKind.String
-                ? a.GetString()
-                : null;
-            bool? handover = null;
-            if (root.TryGetProperty("handoverToHumanNeeded", out var h))
-            {
-                handover = h.ValueKind switch
-                {
-                    JsonValueKind.True => true,
-                    JsonValueKind.False => false,
-                    _ => handover
-                };
-            }
+            return Result<(bool, string?)>.Success((false, null));
+        }
 
-            return (ans, handover);
-        }
-        catch
-        {
-            return (null, null);
-        }
+        return Result<(bool, string?)>.Failure($"Unexpected response from Coverage Judge: {judgeText}");
     }
 }
