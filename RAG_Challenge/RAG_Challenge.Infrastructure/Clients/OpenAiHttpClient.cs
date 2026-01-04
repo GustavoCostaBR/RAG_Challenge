@@ -1,9 +1,11 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Domain.Models.Chat;
 using RAG_Challenge.Domain.Models.Embeddings;
+using RAG_Challenge.Domain.Models.Rag;
 using RAG_Challenge.Infrastructure.Configuration;
 
 namespace RAG_Challenge.Infrastructure.Clients;
@@ -21,7 +23,7 @@ internal sealed class OpenAiHttpClient(
     private const string EmbeddingModel = "text-embedding-3-large";
     private const string ChatModel = "gpt-4o";
 
-    public async Task<EmbeddingResponse?> CreateEmbeddingAsync(string input,
+    public async Task<Result<EmbeddingResponse>> CreateEmbeddingAsync(string input,
         CancellationToken cancellationToken = default)
     {
         var payload = new EmbeddingRequest(EmbeddingModel, input);
@@ -32,23 +34,29 @@ internal sealed class OpenAiHttpClient(
         if (!string.IsNullOrWhiteSpace(_options.ApiKey))
         {
             request.Headers.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _options.ApiKey);
+                new AuthenticationHeaderValue("Bearer", _options.ApiKey);
         }
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("OpenAI embeddings call failed with status {StatusCode}", response.StatusCode);
-            return null;
+            return Result<EmbeddingResponse>.Failure(
+                $"OpenAI embeddings call failed with status {response.StatusCode}");
         }
 
-        return await response.Content.ReadFromJsonAsync<EmbeddingResponse>(cancellationToken: cancellationToken);
+        var embeddingResponse =
+            await response.Content.ReadFromJsonAsync<EmbeddingResponse>(cancellationToken: cancellationToken);
+
+        return embeddingResponse is not null
+            ? Result<EmbeddingResponse>.Success(embeddingResponse)
+            : Result<EmbeddingResponse>.Failure("Failed to deserialize embedding response");
     }
 
-    public async Task<ChatCompletionResponse?> CreateChatCompletionAsync(IReadOnlyList<ChatMessage> messages,
+    public async Task<Result<ChatCompletionResponse>> CreateChatCompletionAsync(IReadOnlyList<ChatMessage> messages,
         CancellationToken cancellationToken = default)
     {
-        var payload = new ChatCompletionRequest(ChatModel, messages);
+        var payload = new ChatCompletionRequest(ChatModel, messages, 0);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, ChatCompletionsPath);
         request.Content = JsonContent.Create(payload);
@@ -56,16 +64,21 @@ internal sealed class OpenAiHttpClient(
         if (!string.IsNullOrWhiteSpace(_options.ApiKey))
         {
             request.Headers.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _options.ApiKey);
+                new AuthenticationHeaderValue("Bearer", _options.ApiKey);
         }
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("OpenAI chat completion failed with status {StatusCode}", response.StatusCode);
-            return null;
+            return Result<ChatCompletionResponse>.Failure(
+                $"OpenAI chat completion failed with status {response.StatusCode}");
         }
 
-        return await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(cancellationToken: cancellationToken);
+        var chatResponse =
+            await response.Content.ReadFromJsonAsync<ChatCompletionResponse>(cancellationToken: cancellationToken);
+        return chatResponse is not null
+            ? Result<ChatCompletionResponse>.Success(chatResponse)
+            : Result<ChatCompletionResponse>.Failure("Failed to deserialize chat completion response");
     }
 }

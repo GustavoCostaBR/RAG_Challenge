@@ -2,15 +2,12 @@ version: '3.8'
 services:
   rag-challenge-api:
     build:
-      context: ./RAG_Challenge
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: RAG_Challenge/Dockerfile
     ports:
       - "8080:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      # Override external API settings here if needed
-      # - ExternalApis__ApiA__BaseUrl=https://override-api-a/
-      # - ExternalApis__ApiA__ApiKey=your-key
-      # - ExternalApis__ApiB__BaseUrl=https://override-api-b/
-      # - ExternalApis__ApiB__ApiKey=your-key
+      - ExternalApis__OpenAI__ApiKey=${OPENAI_API_KEY}
+      - ExternalApis__VectorDb__ApiKey=${VECTORDB_API_KEY}
 

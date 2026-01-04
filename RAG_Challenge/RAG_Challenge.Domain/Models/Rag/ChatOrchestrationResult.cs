@@ -10,4 +10,5 @@ public record ChatOrchestrationResult(
     IReadOnlyList<VectorDbSearchResult> RetrievedChunks,
     ChatCompletionResponse? Completion,
     IReadOnlyList<ChatMessage> History,
-    bool HandoverToHumanNeeded);
+    bool HandoverToHumanNeeded,
+    Status Status);
