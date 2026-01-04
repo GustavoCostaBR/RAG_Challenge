@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Domain.Models.Chat;
+using RAG_Challenge.Domain.Models.Embeddings;
 using RAG_Challenge.Domain.Models.Rag;
 using RAG_Challenge.Domain.Models.VectorSearch;
 
@@ -44,11 +46,13 @@ internal sealed class RagOrchestrator(IOpenAiClient openAi, IVectorDbClient vect
 
         var history = request.History;
         var contextChunk = string.Join("\n\n", retrieved.Select(r => $"[{r.Type}] {r.Content}"));
+        var allN2 = retrieved.Count > 0 &&
+                    retrieved.All(r => string.Equals(r.Type, "N2", StringComparison.OrdinalIgnoreCase));
         var (judgeClarify, judgePrompt) =
             await EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
 
         var system = new ChatMessage("system",
-            "You are a helpful assistant. Use the provided context to answer succinctly. Use just the context and nothing else (no external knowledge). ");
+            "You are a helpful assistant. Use only the provided context (no external knowledge). Respond in JSON as {\"answer\":\"...\",\"handoverToHumanNeeded\":false}. If any content you rely on is labeled N2 (only if you used it for the answer), set handoverToHumanNeeded to true. Keep answer concise.");
 
         var messages = new List<ChatMessage> { system };
         messages.AddRange(history);
@@ -62,49 +66,70 @@ internal sealed class RagOrchestrator(IOpenAiClient openAi, IVectorDbClient vect
         var needClarification = heuristicClarify || judgeClarify;
         var handover = false;
 
-        if (needClarification && clarificationsSoFar >= MaxClarifications)
+        switch (needClarification)
         {
-            // Exceeded clarification budget
-            handover = true;
-            const string escalationAnswer = "I need to hand this over to a human specialist for further assistance.";
-            var returnedHistoryEscalate = new List<ChatMessage>(history)
+            case true when clarificationsSoFar >= MaxClarifications:
             {
-                new("user", request.Question),
-                new("assistant", escalationAnswer)
-            };
-            return new ChatOrchestrationResult(escalationAnswer, embedding, retrieved, null, returnedHistoryEscalate,
-                handover);
-        }
+                // Exceeded clarification budget
+                handover = true;
+                return ReturnEscalationAnswer(request, history, embedding, retrieved, handover);
+            }
 
-        if (needClarification)
-        {
-            var reasonText = string.IsNullOrWhiteSpace(judgePrompt)
-                ? "I couldn't find enough information in my internal search. Could you clarify what you'd like to know?"
-                : $"{judgePrompt}";
-            var clarificationPrompt = ClarificationTag + " " + reasonText;
-
-            var returnedHistoryClarify = new List<ChatMessage>(history)
+            case true:
             {
-                new("user", request.Question),
-                new("assistant", clarificationPrompt)
-            };
-            return new ChatOrchestrationResult(clarificationPrompt, embedding, retrieved, null, returnedHistoryClarify,
-                handover);
+                var reasonText = string.IsNullOrWhiteSpace(judgePrompt)
+                    ? "I couldn't find enough information in my internal search. Could you clarify what you'd like to know?"
+                    : $"{judgePrompt}";
+                var clarificationPrompt = ClarificationTag + " " + reasonText;
+
+                var returnedHistoryClarify = new List<ChatMessage>(history)
+                {
+                    new("user", request.Question),
+                    new("assistant", clarificationPrompt)
+                };
+                return new ChatOrchestrationResult(clarificationPrompt, embedding, retrieved, null,
+                    returnedHistoryClarify,
+                    handover);
+            }
         }
 
         // Proceed to answer
         var chat = await _openAi.CreateChatCompletionAsync(messages, cancellationToken);
         var firstChoice = chat is { Choices.Count: > 0 } ? chat.Choices[0] : null;
-        var answer = firstChoice?.Message.Content ?? "No answer";
+        var rawContent = firstChoice?.Message.Content;
+        var (parsedAnswer, parsedHandover) = TryParseModelResponse(rawContent);
+        var answer = parsedAnswer ?? rawContent ?? "No answer";
 
-        // History to return: original history + plain question + assistant answer (no context)
+        if (parsedHandover == true)
+        {
+            return ReturnEscalationAnswer(request, history, embedding, retrieved, true);
+        }
+
         var returnedHistory = new List<ChatMessage>(history)
         {
             new("user", request.Question),
             new("assistant", answer)
         };
 
-        return new ChatOrchestrationResult(answer, embedding, retrieved, chat, returnedHistory, handover);
+        var finalHandover = handover || allN2 || parsedHandover == true;
+        return new ChatOrchestrationResult(answer, embedding, retrieved, chat, returnedHistory, finalHandover);
+    }
+
+    private static ChatOrchestrationResult ReturnEscalationAnswer(
+        RagRequest request,
+        IReadOnlyList<ChatMessage> history,
+        EmbeddingResponse? embedding,
+        IReadOnlyList<VectorDbSearchResult> retrieved,
+        bool handover)
+    {
+        const string escalationAnswer = "I need to hand this over to a human specialist for further assistance.";
+        var returnedHistoryEscalate = new List<ChatMessage>(history)
+        {
+            new("user", request.Question),
+            new("assistant", escalationAnswer)
+        };
+        return new ChatOrchestrationResult(escalationAnswer, embedding, retrieved, null, returnedHistoryEscalate,
+            handover);
     }
 
     private static bool ShouldClarify(IReadOnlyList<VectorDbSearchResult> retrieved)
@@ -161,5 +186,34 @@ internal sealed class RagOrchestrator(IOpenAiClient openAi, IVectorDbClient vect
 
         // Default: do not force clarification if judge is unclear
         return (false, null);
+    }
+
+    private static (string? answer, bool? handoverToHumanNeeded) TryParseModelResponse(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return (null, null);
+        try
+        {
+            using var doc = JsonDocument.Parse(content);
+            var root = doc.RootElement;
+            var ans = root.TryGetProperty("answer", out var a) && a.ValueKind == JsonValueKind.String
+                ? a.GetString()
+                : null;
+            bool? handover = null;
+            if (root.TryGetProperty("handoverToHumanNeeded", out var h))
+            {
+                handover = h.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => handover
+                };
+            }
+
+            return (ans, handover);
+        }
+        catch
+        {
+            return (null, null);
+        }
     }
 }
