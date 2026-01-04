@@ -201,9 +201,13 @@ internal sealed class RagOrchestrator(
         IReadOnlyList<ChatMessage> chatHistory,
         EmbeddingResponse? embedding,
         IReadOnlyList<VectorDbSearchResult> retrievedContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        byte retryCount  = 0)
     {
-        var chatResult = await openAi.CreateChatCompletionAsync(messages, cancellationToken);
+        var chatResult = await ExecuteWithRetryAsync(
+            () => openAi.CreateChatCompletionAsync(messages, cancellationToken),
+            maxRetries: 2,
+            cancellationToken);
         if (!chatResult.IsSuccess)
         {
             return new ChatOrchestrationResult(
@@ -238,7 +242,25 @@ internal sealed class RagOrchestrator(
 
         if (parsedHandoverToHuman)
         {
-            return ReturnEscalationAnswer(request, chatHistory, embedding, retrievedContext, true);
+            retryCount = (byte)(retryCount + 1);
+            if (retryCount <= 2)
+            {
+                return await GetAnswer(
+                    request,
+                    messages,
+                    chatHistory,
+                    embedding,
+                    retrievedContext,
+                    cancellationToken,
+                    retryCount);    
+            }
+            
+            return ReturnEscalationAnswer(
+                request,
+                chatHistory,
+                embedding, 
+                retrievedContext,
+                true);
         }
 
         var returnedHistory = new List<ChatMessage>(chatHistory)
@@ -290,7 +312,10 @@ internal sealed class RagOrchestrator(
             new(RoleConstants.UserRole, $"Question: {question}\n\nContext:\n{context}")
         };
 
-        var judgeResult = await openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken);
+        var judgeResult = await ExecuteWithRetryAsync(
+            () => openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken),
+            maxRetries: 2,
+            cancellationToken);
 
         if (!judgeResult.IsSuccess)
         {
@@ -324,5 +349,29 @@ internal sealed class RagOrchestrator(
         }
 
         return Result<(bool, string?)>.Failure($"Unexpected response from Coverage Judge: {judgeText}");
+    }
+
+    private static async Task<Result<T>> ExecuteWithRetryAsync<T>(
+        Func<Task<Result<T>>> action,
+        int maxRetries,
+        CancellationToken cancellationToken)
+    {
+        var result = Result<T>.Failure("Operation not executed");
+
+        for (var i = 0; i <= maxRetries; i++)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Result<T>.Failure("Operation cancelled");
+            }
+
+            result = await action();
+            if (result.IsSuccess)
+            {
+                return result;
+            }
+        }
+
+        return result;
     }
 }
