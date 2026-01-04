@@ -18,6 +18,13 @@ internal sealed class RagOrchestrator(
 {
     private const string ClarificationTag = "[clarification]";
 
+
+    // Nao se refere ao numero maximo de tentativas, mas sim ao numero maximo de tentativas para cada um dos problemas
+    // No pior caso, no cenahrio que temos que escalar porque o content type é N2, o modelo fica um pouco mais lento (estamos falando de O(N²))
+    // Por causa das retentativas, mas é aceitavel considerando que é um cenário que deve ser raro e buscamos estabilidade
+    // em todos os cenarios
+    private const int MaximumRetryCount = 2;
+
     public async Task<ChatOrchestrationResult> GenerateAnswerAsync(RagRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -203,14 +210,13 @@ internal sealed class RagOrchestrator(
         IReadOnlyList<VectorDbSearchResult> retrievedContext,
         CancellationToken cancellationToken)
     {
-        const int maxLogicRetries = 2;
         var attempt = 0;
 
         while (true)
         {
             var chatResult = await ExecuteWithRetryAsync(
                 () => openAi.CreateChatCompletionAsync(messages, cancellationToken),
-                maxRetries: 2,
+                maxRetries: MaximumRetryCount,
                 cancellationToken);
 
             if (!chatResult.IsSuccess)
@@ -233,7 +239,7 @@ internal sealed class RagOrchestrator(
 
             if (!parseResult.IsSuccess)
             {
-                if (attempt >= maxLogicRetries)
+                if (attempt >= MaximumRetryCount)
                 {
                     return new ChatOrchestrationResult(
                         Answer: "Failed to parse model response.",
@@ -253,7 +259,7 @@ internal sealed class RagOrchestrator(
 
             if (parsedHandoverToHuman)
             {
-                if (attempt >= maxLogicRetries)
+                if (attempt >= MaximumRetryCount)
                 {
                     return ReturnEscalationAnswer(
                         request,
@@ -319,7 +325,7 @@ internal sealed class RagOrchestrator(
 
         var judgeResult = await ExecuteWithRetryAsync(
             () => openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken),
-            maxRetries: 2,
+            maxRetries: MaximumRetryCount,
             cancellationToken);
 
         if (!judgeResult.IsSuccess)
