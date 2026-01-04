@@ -201,82 +201,87 @@ internal sealed class RagOrchestrator(
         IReadOnlyList<ChatMessage> chatHistory,
         EmbeddingResponse? embedding,
         IReadOnlyList<VectorDbSearchResult> retrievedContext,
-        CancellationToken cancellationToken,
-        byte retryCount  = 0)
+        CancellationToken cancellationToken)
     {
-        var chatResult = await ExecuteWithRetryAsync(
-            () => openAi.CreateChatCompletionAsync(messages, cancellationToken),
-            maxRetries: 2,
-            cancellationToken);
-        if (!chatResult.IsSuccess)
+        const int maxLogicRetries = 2;
+        var attempt = 0;
+
+        while (true)
         {
-            return new ChatOrchestrationResult(
-                Answer: "Failed to get chat completion.",
-                Embedding: embedding,
-                RetrievedChunks: retrievedContext,
-                Completion: null,
-                History: chatHistory,
-                HandoverToHumanNeeded: true,
-                Status: chatResult.Status);
-        }
+            var chatResult = await ExecuteWithRetryAsync(
+                () => openAi.CreateChatCompletionAsync(messages, cancellationToken),
+                maxRetries: 2,
+                cancellationToken);
 
-        var chat = chatResult.Value;
-        var firstChoice = chat is { Choices.Count: > 0 } ? chat.Choices[0] : null;
-        var rawContent = firstChoice?.Message.Content;
-
-        var parseResult = ModelResponseParser.ParseModelResponse(rawContent);
-
-        if (!parseResult.IsSuccess)
-        {
-            return new ChatOrchestrationResult(
-                Answer: "Failed to parse model response.",
-                Embedding: embedding,
-                RetrievedChunks: retrievedContext,
-                Completion: chat,
-                History: chatHistory,
-                HandoverToHumanNeeded: true,
-                Status: parseResult.Status);
-        }
-
-        var (answer, parsedHandoverToHuman) = parseResult.Value;
-
-        if (parsedHandoverToHuman)
-        {
-            retryCount = (byte)(retryCount + 1);
-            if (retryCount <= 2)
+            if (!chatResult.IsSuccess)
             {
-                return await GetAnswer(
-                    request,
-                    messages,
-                    chatHistory,
-                    embedding,
-                    retrievedContext,
-                    cancellationToken,
-                    retryCount);    
+                return new ChatOrchestrationResult(
+                    Answer: "Failed to get chat completion.",
+                    Embedding: embedding,
+                    RetrievedChunks: retrievedContext,
+                    Completion: null,
+                    History: chatHistory,
+                    HandoverToHumanNeeded: true,
+                    Status: chatResult.Status);
             }
-            
-            return ReturnEscalationAnswer(
-                request,
-                chatHistory,
-                embedding, 
+
+            var chat = chatResult.Value;
+            var firstChoice = chat is { Choices.Count: > 0 } ? chat.Choices[0] : null;
+            var rawContent = firstChoice?.Message.Content;
+
+            var parseResult = ModelResponseParser.ParseModelResponse(rawContent);
+
+            if (!parseResult.IsSuccess)
+            {
+                if (attempt >= maxLogicRetries)
+                {
+                    return new ChatOrchestrationResult(
+                        Answer: "Failed to parse model response.",
+                        Embedding: embedding,
+                        RetrievedChunks: retrievedContext,
+                        Completion: chat,
+                        History: chatHistory,
+                        HandoverToHumanNeeded: true,
+                        Status: parseResult.Status);
+                }
+
+                attempt++;
+                continue;
+            }
+
+            var (answer, parsedHandoverToHuman) = parseResult.Value;
+
+            if (parsedHandoverToHuman)
+            {
+                if (attempt >= maxLogicRetries)
+                {
+                    return ReturnEscalationAnswer(
+                        request,
+                        chatHistory,
+                        embedding,
+                        retrievedContext,
+                        true);
+                }
+
+                attempt++;
+                continue;
+            }
+
+            var returnedHistory = new List<ChatMessage>(chatHistory)
+            {
+                new(RoleConstants.UserRole, request.Question),
+                new(RoleConstants.AssistantRole, answer)
+            };
+
+            return new ChatOrchestrationResult(
+                answer,
+                embedding,
                 retrievedContext,
-                true);
+                chat,
+                returnedHistory,
+                parsedHandoverToHuman,
+                Status.Ok());
         }
-
-        var returnedHistory = new List<ChatMessage>(chatHistory)
-        {
-            new(RoleConstants.UserRole, request.Question),
-            new(RoleConstants.AssistantRole, answer)
-        };
-
-        return new ChatOrchestrationResult(
-            answer,
-            embedding,
-            retrievedContext,
-            chat,
-            returnedHistory,
-            parsedHandoverToHuman,
-            Status.Ok());
     }
 
     private static ChatOrchestrationResult ReturnEscalationAnswer(
