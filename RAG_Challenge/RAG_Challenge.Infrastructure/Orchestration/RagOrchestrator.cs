@@ -247,8 +247,14 @@ internal sealed class RagOrchestrator(
             new(RoleConstants.AssistantRole, answer)
         };
 
-        return new ChatOrchestrationResult(answer, embedding, retrievedContext, chat, returnedHistory,
-            parsedHandoverToHuman, Status.Ok());
+        return new ChatOrchestrationResult(
+            answer,
+            embedding,
+            retrievedContext,
+            chat,
+            returnedHistory,
+            parsedHandoverToHuman,
+            Status.Ok());
     }
 
     private static ChatOrchestrationResult ReturnEscalationAnswer(

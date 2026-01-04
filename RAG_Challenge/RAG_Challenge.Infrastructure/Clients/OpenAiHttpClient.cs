@@ -54,7 +54,7 @@ internal sealed class OpenAiHttpClient(
     public async Task<Result<ChatCompletionResponse>> CreateChatCompletionAsync(IReadOnlyList<ChatMessage> messages,
         CancellationToken cancellationToken = default)
     {
-        var payload = new ChatCompletionRequest(ChatModel, messages, 0);
+        var payload = new ChatCompletionRequest(ChatModel, messages, 0.2);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, ChatCompletionsPath);
         request.Content = JsonContent.Create(payload);
