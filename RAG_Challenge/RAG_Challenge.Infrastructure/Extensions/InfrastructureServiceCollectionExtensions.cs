@@ -10,7 +10,7 @@ namespace RAG_Challenge.Infrastructure.Extensions;
 
 public static class InfrastructureServiceCollectionExtensions
 {
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static void AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<OpenAiOptions>(configuration.GetSection(OpenAiOptions.SectionName));
         services.Configure<VectorDbOptions>(configuration.GetSection(VectorDbOptions.SectionName));
@@ -28,7 +28,5 @@ public static class InfrastructureServiceCollectionExtensions
         });
 
         services.AddScoped<IRagOrchestrator, RagOrchestrator>();
-
-        return services;
     }
 }

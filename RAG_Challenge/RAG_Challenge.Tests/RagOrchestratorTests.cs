@@ -45,7 +45,7 @@ public class RagOrchestratorTests
     [Fact]
     public async Task GenerateAnswerAsync_ReturnsAnswer_WhenQuestionIsAnswerable_Mocked()
     {
-        // Arrange
+        // Preparação
         const string question = "What is a Tesla?";
         var request = new RagRequest(question, [], Projects.TeslaMotorsId);
         var embedding = new EmbeddingResponse(
@@ -66,7 +66,7 @@ public class RagOrchestratorTests
         _vectorDbMock.Setup(x => x.SearchAsync(It.IsAny<VectorSearchRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchResults);
 
-        // Mock Coverage Judge to return YES
+        // Simular Coverage Judge para retornar YES
         _openAiMock.Setup(x => x.CreateChatCompletionAsync(
                 It.Is<IReadOnlyList<ChatMessage>>(m => m.Any(msg => msg.Content.Contains("You are a coverage judge"))),
                 It.IsAny<CancellationToken>()))
@@ -78,7 +78,7 @@ public class RagOrchestratorTests
                 [new ChatChoice(new ChatMessage("assistant", "YES"), "stop")]
             )));
 
-        // Mock Final Answer
+        // Simular Resposta Final
         var answerJson = "{\"answer\": \"Tesla is a car company.\", \"handoverToHumanNeeded\": false}";
         _openAiMock.Setup(x => x.CreateChatCompletionAsync(
                 It.Is<IReadOnlyList<ChatMessage>>(m =>
@@ -92,10 +92,10 @@ public class RagOrchestratorTests
                 [new ChatChoice(new ChatMessage("assistant", answerJson), "stop")]
             )));
 
-        // Act
+        // Ação
         var result = await _orchestrator.GenerateAnswerAsync(request);
 
-        // Assert
+        // Verificação
         Assert.Equal("Tesla is a car company.", result.Answer);
         Assert.False(result.HandoverToHumanNeeded);
     }
@@ -103,7 +103,7 @@ public class RagOrchestratorTests
     [Fact]
     public async Task GenerateAnswerAsync_ReturnsAnswer_WhenQuestionIsAnswerable_RealFlow()
     {
-        // Arrange
+        // Preparação
         var openAiOptions = Options.Create(new OpenAiOptions
         {
             BaseUrl = "https://api.openai.com/v1/",
@@ -134,10 +134,10 @@ public class RagOrchestratorTests
         var question = "What is a Tesla?";
         var request = new RagRequest(question, [], Projects.TeslaMotorsId);
 
-        // Act
+        // Ação
         var result = await orchestrator.GenerateAnswerAsync(request);
 
-        // Assert
+        // Verificação
         Assert.NotNull(result);
         Assert.False(string.IsNullOrWhiteSpace(result.Answer));
     }
@@ -146,10 +146,10 @@ public class RagOrchestratorTests
     public async Task
         GenerateAnswerAsync_EscalatesToHuman_WhenQuestionIsNotAnswerableAndClarificationLimitReached_Mocked()
     {
-        // Arrange
+        // Preparação
         var question = "What is the capital of France?";
 
-        // Mock Embedding
+        // Simular Embedding
         var embedding = new EmbeddingResponse(
             "list",
             [new EmbeddingData("embedding", 0, [0.1f, 0.2f])],
@@ -159,7 +159,7 @@ public class RagOrchestratorTests
         _openAiMock.Setup(x => x.CreateEmbeddingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<EmbeddingResponse>.Success(embedding));
 
-        // Mock Vector Search (Must return something so EvaluateCoverageAsync doesn't fail with internal error)
+        // Simular Busca Vetorial (Deve retornar algo para que EvaluateCoverageAsync não falhe com erro interno)
         var searchResults = new List<VectorDbSearchResult>
         {
             new VectorDbSearchResult("Some irrelevant content about cars.", "N1", 0.5f)
@@ -167,7 +167,7 @@ public class RagOrchestratorTests
         _vectorDbMock.Setup(x => x.SearchAsync(It.IsAny<VectorSearchRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(searchResults);
 
-        // Mock Coverage Judge to return NO
+        // Simular Coverage Judge para retornar NO
         _openAiMock.Setup(x => x.CreateChatCompletionAsync(
                 It.Is<IReadOnlyList<ChatMessage>>(m => m.Any(msg => msg.Content.Contains("You are a coverage judge"))),
                 It.IsAny<CancellationToken>()))
@@ -179,15 +179,15 @@ public class RagOrchestratorTests
                 [new ChatChoice(new ChatMessage("assistant", "NO: I can't find the answer."), "stop")]
             )));
 
-        // Step 1: First call
+        // Passo 1: Primeira chamada
         var request1 = new RagRequest(question, [], Projects.TeslaMotorsId);
         var result1 = await _orchestrator.GenerateAnswerAsync(request1);
 
         Assert.Contains("[clarification]", result1.Answer);
         Assert.False(result1.HandoverToHumanNeeded);
 
-        // Step 2: User insists (Second call)
-        // History needs to include the previous interaction
+        // Passo 2: Usuário insiste (Segunda chamada)
+        // Histórico precisa incluir a interação anterior
         var history2 = new List<ChatMessage>
         {
             new ChatMessage("user", question),
@@ -199,8 +199,8 @@ public class RagOrchestratorTests
         Assert.Contains("[clarification]", result2.Answer);
         Assert.False(result2.HandoverToHumanNeeded);
 
-        // Step 3: User insists again (Third call)
-        // History needs to include both previous interactions
+        // Passo 3: Usuário insiste novamente (Terceira chamada)
+        // Histórico precisa incluir ambas as interações anteriores
         var history3 = new List<ChatMessage>(history2)
         {
             new ChatMessage("user", question),
@@ -209,7 +209,7 @@ public class RagOrchestratorTests
         var request3 = new RagRequest(question, history3, Projects.TeslaMotorsId);
         var result3 = await _orchestrator.GenerateAnswerAsync(request3);
 
-        // Assert
+        // Verificação
         Assert.Equal("I need to hand this over to a human specialist for further assistance.", result3.Answer);
         Assert.True(result3.HandoverToHumanNeeded);
     }
@@ -218,7 +218,7 @@ public class RagOrchestratorTests
     public async Task
         GenerateAnswerAsync_EscalatesToHuman_WhenQuestionIsNotAnswerableAndClarificationLimitReached_RealFlow()
     {
-        // Arrange
+        // Preparação
         var openAiOptions = Options.Create(new OpenAiOptions
         {
             BaseUrl = "https://api.openai.com/v1/",
@@ -248,14 +248,14 @@ public class RagOrchestratorTests
 
         var question = "What is the capital of France?";
 
-        // Step 1: First call
+        // Passo 1: Primeira chamada
         var request1 = new RagRequest(question, [], Projects.TeslaMotorsId);
         var result1 = await orchestrator.GenerateAnswerAsync(request1);
 
-        // Assert.Contains("[clarification]", result1.Answer); // Depending on real response
+        // Assert.Contains("[clarification]", result1.Answer); // Dependendo da resposta real
         Assert.False(result1.HandoverToHumanNeeded);
 
-        // Step 2: User insists (Second call)
+        // Passo 2: Usuário insiste (Segunda chamada)
         var history2 = new List<ChatMessage>
         {
             new ChatMessage("user", question),
@@ -264,10 +264,10 @@ public class RagOrchestratorTests
         var request2 = new RagRequest(question, history2, Projects.TeslaMotorsId);
         var result2 = await orchestrator.GenerateAnswerAsync(request2);
 
-        // Assert.Contains("[clarification]", result2.Answer); // Depending on real response
+        // Assert.Contains("[clarification]", result2.Answer); // Dependendo da resposta real
         Assert.False(result2.HandoverToHumanNeeded);
 
-        // Step 3: User insists again (Third call)
+        // Passo 3: Usuário insiste novamente (Terceira chamada)
         var history3 = new List<ChatMessage>(history2)
         {
             new ChatMessage("user", question),
@@ -276,7 +276,7 @@ public class RagOrchestratorTests
         var request3 = new RagRequest(question, history3, Projects.TeslaMotorsId);
         var result3 = await orchestrator.GenerateAnswerAsync(request3);
 
-        // Assert
+        // Verificação
         Assert.True(result3.HandoverToHumanNeeded);
     }
 }

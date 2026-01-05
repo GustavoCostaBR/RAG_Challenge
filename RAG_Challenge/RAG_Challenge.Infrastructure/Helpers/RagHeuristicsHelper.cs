@@ -11,8 +11,9 @@ public static class RagHeuristicsHelper
 
     public static bool ShouldClarify(IReadOnlyList<VectorDbSearchResult> retrieved)
     {
-        // Heuristic: if the top score is low or the average of the top 3 is low, we should clarify.
-        // This helps in cases where we have some matches, but they are not very relevant.
+        // Heurística: se a pontuação máxima for baixa ou a média das 3 melhores for baixa, devemos esclarecer.
+        // Isso ajuda nos casos em que temos algumas correspondências, mas elas não são muito relevantes.
+        // Como comentado no readme, esses limiares podem ser ajustados conforme necessário.
         if (retrieved.Count == 0)
         {
             return true;
@@ -21,7 +22,7 @@ public static class RagHeuristicsHelper
         var topScore = retrieved[0].Score ?? 0;
         var avgTop3 = retrieved.Take(Math.Min(3, retrieved.Count)).Average(r => r.Score ?? 0);
 
-        // Hybrid heuristic: low top score OR low average => clarify
+        // Heurística híbrida: pontuação máxima baixa OU média baixa => esclarecer
         return topScore < 0.45 || avgTop3 < 0.4;
     }
 
