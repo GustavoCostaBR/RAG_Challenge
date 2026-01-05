@@ -143,7 +143,7 @@ internal sealed class RagOrchestrator(
         return Result<IReadOnlyList<VectorDbSearchResult>>.Success(retrievedContext);
     }
 
-    private ChatOrchestrationResult HandleClarification(
+    private static ChatOrchestrationResult HandleClarification(
         RagRequest request,
         EmbeddingResponse embedding,
         IReadOnlyList<VectorDbSearchResult> retrievedContext,
@@ -354,12 +354,9 @@ internal sealed class RagOrchestrator(
                 : Result<(bool, string?)>.Success((true, clarification));
         }
 
-        if (judgeText.StartsWith("YES", true, CultureInfo.InvariantCulture))
-        {
-            return Result<(bool, string?)>.Success((false, null));
-        }
-
-        return Result<(bool, string?)>.Failure($"Unexpected response from Coverage Judge: {judgeText}");
+        return judgeText.StartsWith("YES", true, CultureInfo.InvariantCulture)
+            ? Result<(bool, string?)>.Success((false, null))
+            : Result<(bool, string?)>.Failure($"Unexpected response from Coverage Judge: {judgeText}");
     }
 
     private static async Task<Result<T>> ExecuteWithRetryAsync<T>(
