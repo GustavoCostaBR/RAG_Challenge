@@ -10,6 +10,6 @@ public static class RagPrompts
     public const string SystemPrompt =
         "You are a helpful assistant. Use only the provided context (no external knowledge). " +
         "Respond in JSON as {\"answer\":\"...\",\"handoverToHumanNeeded\":false}. " +
-        "If any content you rely on is labeled N2 (only if you used it for the answer), set handoverToHumanNeeded to true. " +
+        "If any context you rely on is labeled '[N2]' (only if you used it for the answer), set handoverToHumanNeeded to true. " +
         "Keep answer concise.";
 }

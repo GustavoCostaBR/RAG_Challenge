@@ -18,6 +18,13 @@ internal sealed class RagOrchestrator(
 {
     private const string ClarificationTag = "[clarification]";
 
+
+    // Nao se refere ao numero maximo de tentativas, mas sim ao numero maximo de tentativas para cada um dos problemas
+    // No pior caso, no cenahrio que temos que escalar porque o content type é N2, o modelo fica um pouco mais lento (estamos falando de O(N²))
+    // Por causa das retentativas, mas é aceitavel considerando que é um cenário que deve ser raro e buscamos estabilidade
+    // em todos os cenarios
+    private const int MaximumRetryCount = 2;
+
     public async Task<ChatOrchestrationResult> GenerateAnswerAsync(RagRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -36,13 +43,12 @@ internal sealed class RagOrchestrator(
                 projectFilterResult.Status);
         }
 
-        var embeddingResult = await openAi.CreateEmbeddingAsync(request.Question, cancellationToken);
+        var embeddingResult = await GetEmbeddingAsync(request.Question, cancellationToken);
         if (!embeddingResult.IsSuccess)
         {
-            logger.LogWarning("Embedding generation failed: {ErrorMessage}", embeddingResult.Status.ErrorMessage);
             return new ChatOrchestrationResult(
                 "Embedding failed",
-                null,
+                embeddingResult.Value,
                 [],
                 null,
                 [],
@@ -50,54 +56,30 @@ internal sealed class RagOrchestrator(
                 embeddingResult.Status);
         }
 
-        var embedding = embeddingResult.Value;
-        var firstEmbedding = embedding is { Data.Count: > 0 } ? embedding.Data[0].Embedding : null;
-        if (firstEmbedding is null)
-        {
-            logger.LogWarning("Embedding generation failed: No embedding data returned");
-            return new ChatOrchestrationResult(
-                "Embedding failed",
-                embedding,
-                [],
-                null,
-                [],
-                false,
-                Status.Error("No embedding data returned"));
-        }
+        var embedding = embeddingResult.Value!;
 
-        var vectorQuery = new VectorQuery(firstEmbedding.ToArray(), 3, "embeddings");
-        var searchRequestResult = VectorSearchBuilder.Build(vectorQuery, request.ProjectId);
-
-        if (!searchRequestResult.IsSuccess)
+        var retrievalResult = await RetrieveContextAsync(embedding, request.ProjectId, cancellationToken);
+        if (!retrievalResult.IsSuccess)
         {
             return new ChatOrchestrationResult(
-                Answer: "Invalid project ID.",
+                Answer: "Context retrieval failed.",
                 Embedding: embedding,
                 RetrievedChunks: [],
                 Completion: null,
                 History: request.History,
                 HandoverToHumanNeeded: false,
-                Status: searchRequestResult.Status);
+                Status: retrievalResult.Status);
         }
 
-        var retrievedContext = await vectorDb.SearchAsync(searchRequestResult.Value!, cancellationToken);
-
-        var chatHistory = request.History;
-
-        var contextChunk = GetContextChunkString(retrievedContext);
+        var retrievedContext = retrievalResult.Value!;
 
         if (RagHeuristicsHelper.IsAllRetrievedContextLabelledN2(retrievedContext))
         {
-            return ReturnEscalationAnswer(
-                request,
-                chatHistory,
-                embedding,
-                retrievedContext,
-                true);
+            return ReturnEscalationAnswer(request, request.History, embedding, retrievedContext, true);
         }
 
-        var coverageEvaluationResult =
-            await EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
+        var contextChunk = GetContextChunkString(retrievedContext);
+        var coverageEvaluationResult = await EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
 
         if (!coverageEvaluationResult.IsSuccess)
         {
@@ -106,62 +88,113 @@ internal sealed class RagOrchestrator(
                 Embedding: embedding,
                 RetrievedChunks: retrievedContext,
                 Completion: null,
-                History: chatHistory,
+                History: request.History,
                 HandoverToHumanNeeded: true,
                 Status: coverageEvaluationResult.Status);
         }
 
         var (judgeClarify, judgePrompt) = coverageEvaluationResult.Value;
-
-        var system = new ChatMessage(RoleConstants.SystemRole, RagPrompts.SystemPrompt);
-
-        var messages = new List<ChatMessage> { system };
-        messages.AddRange(chatHistory);
-
-        var userWithContext = new ChatMessage(RoleConstants.UserRole,
-            $"Question: {request.Question}\n\nContext:\n{contextChunk}");
-
-        messages.Add(userWithContext);
-
-        // Clarification bookkeeping
-        var clarificationsSoFar = RagHeuristicsHelper.GetHistoryClarificationsCount(chatHistory);
         var heuristicClarify = RagHeuristicsHelper.ShouldClarify(retrievedContext);
-        var needClarification = heuristicClarify || judgeClarify;
-        var handoverToHuman = false;
 
-        if (!needClarification)
+        if (heuristicClarify || judgeClarify)
         {
-            return await GetAnswer(
-                request,
-                messages,
-                chatHistory,
-                embedding,
-                retrievedContext,
-                cancellationToken);
+            return HandleClarification(request, embedding, retrievedContext, judgePrompt);
         }
+
+        return await GenerateFinalAnswerAsync(request, embedding, retrievedContext, contextChunk, cancellationToken);
+    }
+
+    private async Task<Result<EmbeddingResponse>> GetEmbeddingAsync(string question,
+        CancellationToken cancellationToken)
+    {
+        var embeddingResult = await openAi.CreateEmbeddingAsync(question, cancellationToken);
+        if (!embeddingResult.IsSuccess)
+        {
+            logger.LogWarning("Embedding generation failed: {ErrorMessage}", embeddingResult.Status.ErrorMessage);
+            return Result<EmbeddingResponse>.Failure(embeddingResult.Status);
+        }
+
+        var embedding = embeddingResult.Value;
+        var firstEmbedding = embedding is { Data.Count: > 0 } ? embedding.Data[0].Embedding : null;
+        if (firstEmbedding is null)
+        {
+            logger.LogWarning("Embedding generation failed: No embedding data returned");
+            return Result<EmbeddingResponse>.Failure("No embedding data returned");
+        }
+
+        return Result<EmbeddingResponse>.Success(embedding!);
+    }
+
+    private async Task<Result<IReadOnlyList<VectorDbSearchResult>>> RetrieveContextAsync(
+        EmbeddingResponse embedding,
+        Guid? projectId,
+        CancellationToken cancellationToken)
+    {
+        var firstEmbedding = embedding.Data[0].Embedding;
+        var vectorQuery = new VectorQuery(firstEmbedding.ToArray(), 3, "embeddings");
+        var searchRequestResult = VectorSearchBuilder.Build(vectorQuery, projectId);
+
+        if (!searchRequestResult.IsSuccess)
+        {
+            return Result<IReadOnlyList<VectorDbSearchResult>>.Failure(searchRequestResult.Status);
+        }
+
+        var retrievedContext = await vectorDb.SearchAsync(searchRequestResult.Value!, cancellationToken);
+        return Result<IReadOnlyList<VectorDbSearchResult>>.Success(retrievedContext);
+    }
+
+    private static ChatOrchestrationResult HandleClarification(
+        RagRequest request,
+        EmbeddingResponse embedding,
+        IReadOnlyList<VectorDbSearchResult> retrievedContext,
+        string? judgePrompt)
+    {
+        var clarificationsSoFar = RagHeuristicsHelper.GetHistoryClarificationsCount(request.History);
 
         if (RagHeuristicsHelper.HasExceededClarificationLimit(clarificationsSoFar))
         {
-            // Exceeded clarification budget
-            handoverToHuman = true;
-            return ReturnEscalationAnswer(request, chatHistory, embedding, retrievedContext, handoverToHuman);
+            return ReturnEscalationAnswer(request, request.History, embedding, retrievedContext, true);
         }
 
         var clarificationPrompt = ClarificationTag + " " + judgePrompt;
-
-        var returnedHistoryClarify = new List<ChatMessage>(chatHistory)
+        var returnedHistoryClarify = new List<ChatMessage>(request.History)
         {
             new(RoleConstants.UserRole, request.Question),
             new(RoleConstants.AssistantRole, clarificationPrompt)
         };
+
         return new ChatOrchestrationResult(
             clarificationPrompt,
             embedding,
             retrievedContext,
             null,
             returnedHistoryClarify,
-            handoverToHuman, 
+            false,
             Status.Ok());
+    }
+
+    private async Task<ChatOrchestrationResult> GenerateFinalAnswerAsync(
+        RagRequest request,
+        EmbeddingResponse embedding,
+        IReadOnlyList<VectorDbSearchResult> retrievedContext,
+        string contextChunk,
+        CancellationToken cancellationToken)
+    {
+        var system = new ChatMessage(RoleConstants.SystemRole, RagPrompts.SystemPrompt);
+        var messages = new List<ChatMessage> { system };
+        messages.AddRange(request.History);
+
+        var userWithContext = new ChatMessage(RoleConstants.UserRole,
+            $"Question: {request.Question}\n\nContext:\n{contextChunk}");
+        messages.Add(userWithContext);
+
+        return await GetAnswer(
+            request,
+            messages,
+            request.History,
+            embedding,
+            retrievedContext,
+            cancellationToken);
     }
 
     private static string GetContextChunkString(IReadOnlyList<VectorDbSearchResult> context)
@@ -177,52 +210,88 @@ internal sealed class RagOrchestrator(
         IReadOnlyList<VectorDbSearchResult> retrievedContext,
         CancellationToken cancellationToken)
     {
-        var chatResult = await openAi.CreateChatCompletionAsync(messages, cancellationToken);
-        if (!chatResult.IsSuccess)
+        var attempt = 0;
+        
+        var isAnyContentLabelledN2 = RagHeuristicsHelper.IsAnyRetrievedContextLabelledN2(retrievedContext);
+
+        while (true)
         {
+            var chatResult = await ExecuteWithRetryAsync(
+                () => openAi.CreateChatCompletionAsync(messages, cancellationToken),
+                maxRetries: MaximumRetryCount,
+                cancellationToken);
+
+            if (!chatResult.IsSuccess)
+            {
+                return new ChatOrchestrationResult(
+                    Answer: "Failed to get chat completion.",
+                    Embedding: embedding,
+                    RetrievedChunks: retrievedContext,
+                    Completion: null,
+                    History: chatHistory,
+                    HandoverToHumanNeeded: true,
+                    Status: chatResult.Status);
+            }
+
+            var chat = chatResult.Value;
+            var firstChoice = chat is { Choices.Count: > 0 } ? chat.Choices[0] : null;
+            var rawContent = firstChoice?.Message.Content;
+
+            var parseResult = ModelResponseParser.ParseModelResponse(rawContent);
+
+            if (!parseResult.IsSuccess)
+            {
+                if (attempt >= MaximumRetryCount)
+                {
+                    return new ChatOrchestrationResult(
+                        Answer: "Failed to parse model response.",
+                        Embedding: embedding,
+                        RetrievedChunks: retrievedContext,
+                        Completion: chat,
+                        History: chatHistory,
+                        HandoverToHumanNeeded: true,
+                        Status: parseResult.Status);
+                }
+
+                attempt++;
+                continue;
+            }
+
+            var (answer, parsedHandoverToHuman) = parseResult.Value;
+
+            // Adicionei o check para ver se algum dos conteúdos recuperados é N2
+            // Isso diminui o risco de alucinacao jah que iremos desconsiderar conteúdo usado como N2 se nenhum eh N2
+            if (isAnyContentLabelledN2 && parsedHandoverToHuman)
+            {
+                if (attempt >= MaximumRetryCount)
+                {
+                    return ReturnEscalationAnswer(
+                        request,
+                        chatHistory,
+                        embedding,
+                        retrievedContext,
+                        true);
+                }
+
+                attempt++;
+                continue;
+            }
+
+            var returnedHistory = new List<ChatMessage>(chatHistory)
+            {
+                new(RoleConstants.UserRole, request.Question),
+                new(RoleConstants.AssistantRole, answer)
+            };
+
             return new ChatOrchestrationResult(
-                Answer: "Failed to get chat completion.",
-                Embedding: embedding,
-                RetrievedChunks: retrievedContext,
-                Completion: null,
-                History: chatHistory,
-                HandoverToHumanNeeded: true,
-                Status: chatResult.Status);
+                answer,
+                embedding,
+                retrievedContext,
+                chat,
+                returnedHistory,
+                parsedHandoverToHuman,
+                Status.Ok());
         }
-
-        var chat = chatResult.Value;
-        var firstChoice = chat is { Choices.Count: > 0 } ? chat.Choices[0] : null;
-        var rawContent = firstChoice?.Message.Content;
-
-        var parseResult = ModelResponseParser.ParseModelResponse(rawContent);
-
-        if (!parseResult.IsSuccess)
-        {
-            return new ChatOrchestrationResult(
-                Answer: "Failed to parse model response.",
-                Embedding: embedding,
-                RetrievedChunks: retrievedContext,
-                Completion: chat,
-                History: chatHistory,
-                HandoverToHumanNeeded: true,
-                Status: parseResult.Status);
-        }
-
-        var (answer, parsedHandoverToHuman) = parseResult.Value;
-
-        if (parsedHandoverToHuman)
-        {
-            return ReturnEscalationAnswer(request, chatHistory, embedding, retrievedContext, true);
-        }
-
-        var returnedHistory = new List<ChatMessage>(chatHistory)
-        {
-            new(RoleConstants.UserRole, request.Question),
-            new(RoleConstants.AssistantRole, answer)
-        };
-
-        return new ChatOrchestrationResult(answer, embedding, retrievedContext, chat, returnedHistory,
-            parsedHandoverToHuman, Status.Ok());
     }
 
     private static ChatOrchestrationResult ReturnEscalationAnswer(
@@ -258,7 +327,10 @@ internal sealed class RagOrchestrator(
             new(RoleConstants.UserRole, $"Question: {question}\n\nContext:\n{context}")
         };
 
-        var judgeResult = await openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken);
+        var judgeResult = await ExecuteWithRetryAsync(
+            () => openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken),
+            maxRetries: MaximumRetryCount,
+            cancellationToken);
 
         if (!judgeResult.IsSuccess)
         {
@@ -286,11 +358,32 @@ internal sealed class RagOrchestrator(
                 : Result<(bool, string?)>.Success((true, clarification));
         }
 
-        if (judgeText.StartsWith("YES", true, CultureInfo.InvariantCulture))
+        return judgeText.StartsWith("YES", true, CultureInfo.InvariantCulture)
+            ? Result<(bool, string?)>.Success((false, null))
+            : Result<(bool, string?)>.Failure($"Unexpected response from Coverage Judge: {judgeText}");
+    }
+
+    private static async Task<Result<T>> ExecuteWithRetryAsync<T>(
+        Func<Task<Result<T>>> action,
+        int maxRetries,
+        CancellationToken cancellationToken)
+    {
+        var result = Result<T>.Failure("Operation not executed");
+
+        for (var i = 0; i <= maxRetries; i++)
         {
-            return Result<(bool, string?)>.Success((false, null));
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Result<T>.Failure("Operation cancelled");
+            }
+
+            result = await action();
+            if (result.IsSuccess)
+            {
+                return result;
+            }
         }
 
-        return Result<(bool, string?)>.Failure($"Unexpected response from Coverage Judge: {judgeText}");
+        return result;
     }
 }
