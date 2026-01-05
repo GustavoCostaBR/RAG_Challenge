@@ -98,6 +98,20 @@ private const string OpenAiApiKey = "PLACEHOLDER"; // Replace with actual key
 private const string VectorDbApiKey = "PLACEHOLDER"; // Replace with actual key
 ```
 
+### Technical Decisions & Trade-offs
+
+*   **AI Stability & Retries:** To mitigate potential AI hallucinations—specifically cases where the model might incorrectly flag content as "N2" (requiring human escalation) or fail to parse responses—I implemented retry logic. This ensures that transient errors or minor inconsistencies in the model's output don't immediately lead to failure or unnecessary escalation.
+    *   **Optimization:** I added a check to verify if any retrieved content is actually labeled "N2". If the model requests escalation but no "N2" content exists in the context, it is treated as a hallucination, and the retry logic is skipped to save time.
+    *   **Trade-off:** For valid escalation cases (where "N2" content is present), the process might take slightly longer due to the retry loop (configured via `maxLogicRetries`). This is an acceptable trade-off because "N2" content is expected to be rare, and ensuring the necessity of escalation is prioritized over speed in these specific cases.
+*   **Error Handling:** I adopted a `Result<T>` wrapper pattern instead of relying on exceptions for flow control. This provides more granular control over error states and makes the data flow more explicit.
+*   **Testing Strategy:** The project includes basic flow tests to verify the main execution paths and ensure regressions weren't introduced during refactoring. However, comprehensive edge case coverage was not the primary focus for this iteration.
+*   **Heuristics:** The threshold values used for heuristics (e.g., determining when to ask for clarification based on vector search scores) are currently estimated. In a production environment, these would need to be tuned based on real usage data and more extensive testing.
+*   **Coverage Evaluation:** The process of evaluating whether the retrieved context is sufficient to answer the question has been isolated into a separate AI request. This "Coverage Judge" step improves the quality of the final answer by filtering out irrelevant context early.
+*   **Architecture:** The architecture was kept intentionally simple to focus on the challenge's core problems. While it follows good practices (dependency injection, separation of concerns), it avoids over-engineering.
+*   **Project Management:** Project configurations (like the Tesla project ID) are currently stored in an in-memory dictionary. A production-ready solution would persist this data in a database to allow for dynamic updates without recompilation.
+*   **Clarification Tagging:** For simplicity, clarification requests are marked with a `[clarification]` string tag in the response. This allows for easy parsing by the client, though a more structured approach (e.g., a specific JSON field) could be considered for the future.
+*   **Scope:** Security implementation and extensive logging were considered out of scope for this challenge to prioritize the core RAG logic and feature implementation.
+
 ---
 
 ## Português (PT-BR) 🇧🇷
@@ -190,3 +204,16 @@ private const string OpenAiApiKey = "PLACEHOLDER"; // Substitua pela chave real
 private const string VectorDbApiKey = "PLACEHOLDER"; // Substitua pela chave real
 ```
 
+### Decisões Técnicas e Compromissos
+
+*   **Estabilidade da IA e Novas Tentativas:** Para mitigar potenciais alucinações da IA—especificamente casos onde o modelo pode sinalizar incorretamente o conteúdo como "N2" (exigindo escalonamento humano) ou falhar ao analisar respostas—implementei uma lógica de nova tentativa. Isso garante que erros transitórios ou pequenas inconsistências na saída do modelo não levem imediatamente à falha ou escalonamento desnecessário.
+    *   **Otimização:** Adicionei uma verificação para confirmar se algum conteúdo recuperado é realmente rotulado como "N2". Se o modelo solicitar escalonamento, mas não houver conteúdo "N2" no contexto, isso é tratado como uma alucinação e a lógica de nova tentativa é ignorada para economizar tempo.
+    *   **Compromisso:** Para casos de escalonamento válidos (onde o conteúdo "N2" está presente), o processo pode demorar um pouco mais devido ao loop de novas tentativas (configurado via `maxLogicRetries`). Este é um compromisso aceitável porque espera-se que o conteúdo "N2" seja raro, e garantir a necessidade de escalonamento é priorizado em relação à velocidade nesses casos específicos.
+*   **Tratamento de Erros:** Adotei um padrão de wrapper `Result<T>` em vez de depender de exceções para controle de fluxo. Isso fornece um controle mais granular sobre os estados de erro e torna o fluxo de dados mais explícito.
+*   **Estratégia de Testes:** O projeto inclui testes de fluxo básicos para verificar os principais caminhos de execução e garantir que regressões não sejam introduzidas durante a refatoração. No entanto, a cobertura abrangente de casos extremos não foi o foco principal desta iteração.
+*   **Heurísticas:** Os valores de limiar usados para heurísticas (por exemplo, determinar quando pedir esclarecimentos com base nas pontuações de busca vetorial) são atualmente estimados. Em um ambiente de produção, estes precisariam ser ajustados com base em dados de uso reais e testes mais extensos.
+*   **Avaliação de Cobertura:** O processo de avaliação se o contexto recuperado é suficiente para responder à pergunta foi isolado em uma solicitação de IA separada. Esta etapa "Juiz de Cobertura" melhora a qualidade da resposta final filtrando contextos irrelevantes precocemente.
+*   **Arquitetura:** A arquitetura foi mantida intencionalmente simples para focar nos problemas centrais do desafio. Embora siga boas práticas (injeção de dependência, separação de preocupações), evita superengenharia.
+*   **Gerenciamento de Projetos:** As configurações do projeto (como o ID do projeto Tesla) estão atualmente armazenadas em um dicionário na memória. Uma solução pronta para produção persistiria esses dados em um banco de dados para permitir atualizações dinâmicas sem recompilação.
+*   **Tagueamento de Esclarecimento:** Para simplicidade, os pedidos de esclarecimento são marcados com uma tag de string `[clarification]` na resposta. Isso permite uma fácil análise pelo cliente, embora uma abordagem mais estruturada (por exemplo, um campo JSON específico) possa ser considerada para o futuro.
+*   **Escopo:** A implementação de segurança e o registro extensivo foram considerados fora do escopo deste desafio para priorizar a lógica central do RAG e a implementação de recursos.
