@@ -211,6 +211,8 @@ internal sealed class RagOrchestrator(
         CancellationToken cancellationToken)
     {
         var attempt = 0;
+        
+        var isAnyContentLabelledN2 = RagHeuristicsHelper.IsAnyRetrievedContextLabelledN2(retrievedContext);
 
         while (true)
         {
@@ -257,7 +259,9 @@ internal sealed class RagOrchestrator(
 
             var (answer, parsedHandoverToHuman) = parseResult.Value;
 
-            if (parsedHandoverToHuman)
+            // Adicionei o check para ver se algum dos conteúdos recuperados é N2
+            // Isso diminui o risco de alucinacao jah que iremos desconsiderar conteúdo usado como N2 se nenhum eh N2
+            if (isAnyContentLabelledN2 && parsedHandoverToHuman)
             {
                 if (attempt >= MaximumRetryCount)
                 {

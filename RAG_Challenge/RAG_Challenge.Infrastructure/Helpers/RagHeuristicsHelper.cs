@@ -22,13 +22,19 @@ public static class RagHeuristicsHelper
         var avgTop3 = retrieved.Take(Math.Min(3, retrieved.Count)).Average(r => r.Score ?? 0);
 
         // Hybrid heuristic: low top score OR low average => clarify
-        return topScore < 0.35 || avgTop3 < 0.30;
+        return topScore < 0.45 || avgTop3 < 0.4;
     }
 
     public static bool IsAllRetrievedContextLabelledN2(IReadOnlyList<VectorDbSearchResult> context)
     {
         return context.Count > 0 &&
                context.All(r => string.Equals(r.Type, "N2", StringComparison.OrdinalIgnoreCase));
+    }
+    
+    public static bool IsAnyRetrievedContextLabelledN2(IReadOnlyList<VectorDbSearchResult> context)
+    {
+        return context.Count > 0 &&
+               context.Any(r => string.Equals(r.Type, "N2", StringComparison.OrdinalIgnoreCase));
     }
 
     public static int GetHistoryClarificationsCount(IReadOnlyList<ChatMessage> history)
