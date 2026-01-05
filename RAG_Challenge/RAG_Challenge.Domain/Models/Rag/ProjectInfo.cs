@@ -4,7 +4,7 @@ namespace RAG_Challenge.Domain.Models.Rag;
 
 public static class Projects
 {
-    // TODO: it can possibly be recorded in a db so we can add more projects dynamically
+    // TODO: isso pode possivelmente ser salvo em um banco de dados para que possamos adicionar mais projetos dinamicamente
     public static readonly Guid TeslaMotorsId = Guid.Parse("0a52b428-e00b-4f16-af14-98404f17fab7");
 
     private static readonly FrozenDictionary<Guid, string> Filters = new Dictionary<Guid, string>
