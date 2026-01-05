@@ -1,7 +1,7 @@
 using RAG_Challenge.Domain.Models.Rag;
 using RAG_Challenge.Domain.Models.VectorSearch;
 
-namespace RAG_Challenge.Infrastructure.Helpers;
+namespace RAG_Challenge.Application.Helpers;
 
 public static class VectorSearchBuilder
 {

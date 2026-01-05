@@ -1,3 +1,4 @@
+using RAG_Challenge.Application.Extensions;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Domain.Models.Rag;
 using RAG_Challenge.Infrastructure.Extensions;
@@ -7,6 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddApplication();
 
 var app = builder.Build();
 

@@ -1,14 +1,14 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using RAG_Challenge.Application.Helpers;
 using RAG_Challenge.Domain.Constants;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Domain.Models.Chat;
 using RAG_Challenge.Domain.Models.Embeddings;
 using RAG_Challenge.Domain.Models.Rag;
 using RAG_Challenge.Domain.Models.VectorSearch;
-using RAG_Challenge.Infrastructure.Helpers;
 
-namespace RAG_Challenge.Infrastructure.Orchestration;
+namespace RAG_Challenge.Application.Orchestration;
 
 internal sealed class RagOrchestrator(
     IOpenAiClient openAi,
@@ -211,7 +211,7 @@ internal sealed class RagOrchestrator(
         CancellationToken cancellationToken)
     {
         var attempt = 0;
-        
+
         var isAnyContentLabelledN2 = RagHeuristicsHelper.IsAnyRetrievedContextLabelledN2(retrievedContext);
 
         while (true)

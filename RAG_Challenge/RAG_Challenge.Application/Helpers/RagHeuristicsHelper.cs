@@ -2,7 +2,7 @@ using RAG_Challenge.Domain.Constants;
 using RAG_Challenge.Domain.Models.Chat;
 using RAG_Challenge.Domain.Models.VectorSearch;
 
-namespace RAG_Challenge.Infrastructure.Helpers;
+namespace RAG_Challenge.Application.Helpers;
 
 public static class RagHeuristicsHelper
 {
@@ -31,7 +31,7 @@ public static class RagHeuristicsHelper
         return context.Count > 0 &&
                context.All(r => string.Equals(r.Type, "N2", StringComparison.OrdinalIgnoreCase));
     }
-    
+
     public static bool IsAnyRetrievedContextLabelledN2(IReadOnlyList<VectorDbSearchResult> context)
     {
         return context.Count > 0 &&
@@ -41,7 +41,8 @@ public static class RagHeuristicsHelper
     public static int GetHistoryClarificationsCount(IReadOnlyList<ChatMessage> history)
     {
         return history.Count(m =>
-            m.Role == RoleConstants.AssistantRole && m.Content.Contains(ClarificationTag, StringComparison.OrdinalIgnoreCase));
+            m.Role == RoleConstants.AssistantRole &&
+            m.Content.Contains(ClarificationTag, StringComparison.OrdinalIgnoreCase));
     }
 
     public static bool HasExceededClarificationLimit(int clarificationsSoFar)

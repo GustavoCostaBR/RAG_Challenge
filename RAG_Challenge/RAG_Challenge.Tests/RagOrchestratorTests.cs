@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using RAG_Challenge.Application.Orchestration;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Domain.Models.Chat;
 using RAG_Challenge.Domain.Models.Embeddings;
@@ -14,7 +15,6 @@ using RAG_Challenge.Domain.Models.Rag;
 using RAG_Challenge.Domain.Models.VectorSearch;
 using RAG_Challenge.Infrastructure.Clients;
 using RAG_Challenge.Infrastructure.Configuration;
-using RAG_Challenge.Infrastructure.Orchestration;
 using Xunit;
 
 namespace RAG_Challenge.Tests;

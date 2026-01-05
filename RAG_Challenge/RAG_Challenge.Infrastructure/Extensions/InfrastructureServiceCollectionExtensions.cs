@@ -4,7 +4,6 @@ using Microsoft.Extensions.Options;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Infrastructure.Clients;
 using RAG_Challenge.Infrastructure.Configuration;
-using RAG_Challenge.Infrastructure.Orchestration;
 
 namespace RAG_Challenge.Infrastructure.Extensions;
 
@@ -26,7 +25,5 @@ public static class InfrastructureServiceCollectionExtensions
             var options = sp.GetRequiredService<IOptions<VectorDbOptions>>().Value;
             client.BaseAddress = new Uri(options.BaseUrl);
         });
-
-        services.AddScoped<IRagOrchestrator, RagOrchestrator>();
     }
 }
