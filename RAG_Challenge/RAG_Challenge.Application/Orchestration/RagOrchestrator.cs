@@ -136,8 +136,7 @@ internal sealed class RagOrchestrator(
             return Result<IReadOnlyList<VectorDbSearchResult>>.Failure(searchRequestResult.Status);
         }
 
-        var retrievedContext = await vectorDb.SearchAsync(searchRequestResult.Value!, cancellationToken);
-        return Result<IReadOnlyList<VectorDbSearchResult>>.Success(retrievedContext);
+        return await vectorDb.SearchAsync(searchRequestResult.Value!, cancellationToken);
     }
 
     private static ChatOrchestrationResult HandleClarification(

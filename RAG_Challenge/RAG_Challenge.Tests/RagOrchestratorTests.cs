@@ -64,7 +64,7 @@ public class RagOrchestratorTests
         };
 
         _vectorDbMock.Setup(x => x.SearchAsync(It.IsAny<VectorSearchRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(searchResults);
+            .ReturnsAsync(Result<IReadOnlyList<VectorDbSearchResult>>.Success(searchResults));
 
         // Simular Coverage Judge para retornar YES
         _openAiMock.Setup(x => x.CreateChatCompletionAsync(
@@ -165,7 +165,7 @@ public class RagOrchestratorTests
             new VectorDbSearchResult("Some irrelevant content about cars.", "N1", 0.5f)
         };
         _vectorDbMock.Setup(x => x.SearchAsync(It.IsAny<VectorSearchRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(searchResults);
+            .ReturnsAsync(Result<IReadOnlyList<VectorDbSearchResult>>.Success(searchResults));
 
         // Simular Coverage Judge para retornar NO
         _openAiMock.Setup(x => x.CreateChatCompletionAsync(
