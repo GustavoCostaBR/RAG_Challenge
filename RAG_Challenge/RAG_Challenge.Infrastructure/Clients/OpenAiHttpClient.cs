@@ -16,17 +16,14 @@ internal sealed class OpenAiHttpClient(
     ILogger<OpenAiHttpClient> logger) : IOpenAiClient
 {
     private readonly OpenAiOptions _options = options.Value;
-    private const string EmbeddingsPath = "embeddings";
-    private const string ChatCompletionsPath = "chat/completions";
-    private const string EmbeddingModel = "text-embedding-3-large";
-    private const string ChatModel = "gpt-4o";
+
 
     public async Task<Result<EmbeddingResponse>> CreateEmbeddingAsync(string input,
         CancellationToken cancellationToken = default)
     {
-        var payload = new EmbeddingRequest(EmbeddingModel, input);
+        var payload = new EmbeddingRequest(OpenAiOptions.EmbeddingModel, input);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, EmbeddingsPath);
+        using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiOptions.EmbeddingsPath);
         request.Content = JsonContent.Create(payload);
 
         if (!string.IsNullOrWhiteSpace(_options.ApiKey))
@@ -54,9 +51,9 @@ internal sealed class OpenAiHttpClient(
     public async Task<Result<ChatCompletionResponse>> CreateChatCompletionAsync(IReadOnlyList<ChatMessage> messages,
         CancellationToken cancellationToken = default)
     {
-        var payload = new ChatCompletionRequest(ChatModel, messages, 0.2);
+        var payload = new ChatCompletionRequest(OpenAiOptions.ChatModel, messages, 0.2);
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, ChatCompletionsPath);
+        using var request = new HttpRequestMessage(HttpMethod.Post, OpenAiOptions.ChatCompletionsPath);
         request.Content = JsonContent.Create(payload);
 
         if (!string.IsNullOrWhiteSpace(_options.ApiKey))

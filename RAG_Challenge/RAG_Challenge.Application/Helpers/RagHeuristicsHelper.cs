@@ -6,9 +6,6 @@ namespace RAG_Challenge.Application.Helpers;
 
 public static class RagHeuristicsHelper
 {
-    private const int MaxClarifications = 2;
-    private const string ClarificationTag = "[clarification]";
-
     public static bool ShouldClarify(IReadOnlyList<VectorDbSearchResult> retrieved)
     {
         // Heurística: se a pontuação máxima for baixa ou a média das 3 melhores for baixa, devemos esclarecer.
@@ -23,30 +20,30 @@ public static class RagHeuristicsHelper
         var avgTop3 = retrieved.Take(Math.Min(3, retrieved.Count)).Average(r => r.Score ?? 0);
 
         // Heurística híbrida: pontuação máxima baixa OU média baixa => esclarecer
-        return topScore < 0.45 || avgTop3 < 0.4;
+        return topScore < RagOptions.TopScoreThreshold || avgTop3 < RagOptions.AvgTop3ScoreThreshold;
     }
 
     public static bool IsAllRetrievedContextLabelledN2(IReadOnlyList<VectorDbSearchResult> context)
     {
         return context.Count > 0 &&
-               context.All(r => string.Equals(r.Type, "N2", StringComparison.OrdinalIgnoreCase));
+               context.All(r => string.Equals(r.Type, FlowConstants.N2Label, StringComparison.OrdinalIgnoreCase));
     }
 
     public static bool IsAnyRetrievedContextLabelledN2(IReadOnlyList<VectorDbSearchResult> context)
     {
         return context.Count > 0 &&
-               context.Any(r => string.Equals(r.Type, "N2", StringComparison.OrdinalIgnoreCase));
+               context.Any(r => string.Equals(r.Type, FlowConstants.N2Label, StringComparison.OrdinalIgnoreCase));
     }
 
     public static int GetHistoryClarificationsCount(IReadOnlyList<ChatMessage> history)
     {
         return history.Count(m =>
             m.Role == RoleConstants.AssistantRole &&
-            m.Content.Contains(ClarificationTag, StringComparison.OrdinalIgnoreCase));
+            m.Content.Contains(FlowConstants.ClarificationTag, StringComparison.OrdinalIgnoreCase));
     }
 
     public static bool HasExceededClarificationLimit(int clarificationsSoFar)
     {
-        return clarificationsSoFar >= MaxClarifications;
+        return clarificationsSoFar >= RagOptions.MaxClarifications;
     }
 }

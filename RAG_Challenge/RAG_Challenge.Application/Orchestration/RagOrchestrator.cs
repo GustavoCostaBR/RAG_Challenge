@@ -16,9 +16,6 @@ internal sealed class RagOrchestrator(
     ILogger<RagOrchestrator> logger)
     : IRagOrchestrator
 {
-    private const string ClarificationTag = "[clarification]";
-
-
     // Nao se refere ao numero maximo de tentativas, mas sim ao numero maximo de tentativas para cada um dos problemas
     // No pior caso, no cenahrio que temos que escalar porque o content type é N2, o modelo fica um pouco mais lento (estamos falando de O(N²))
     // Por causa das retentativas, mas é aceitavel considerando que é um cenário que deve ser raro e buscamos estabilidade
@@ -156,7 +153,7 @@ internal sealed class RagOrchestrator(
             return ReturnEscalationAnswer(request, request.History, embedding, retrievedContext, true);
         }
 
-        var clarificationPrompt = ClarificationTag + " " + judgePrompt;
+        var clarificationPrompt = FlowConstants.ClarificationTag + " " + judgePrompt;
         var returnedHistoryClarify = new List<ChatMessage>(request.History)
         {
             new(RoleConstants.UserRole, request.Question),
