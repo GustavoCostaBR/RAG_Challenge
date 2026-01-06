@@ -87,6 +87,8 @@ Update the `http` profile to include the required environment variables as shown
 }
 ```
 
+> **Note:** I am aware that using user secrets or environment variables is the standard practice for securing keys. I chose this manual replacement method in `launchSettings.json` purely to simplify the setup process for reviewers, avoiding the need for external configuration steps.
+
 ### Running Tests
 
 The project includes integration/unit tests in the `RAG_Challenge.Tests` project.
@@ -97,6 +99,8 @@ The project includes integration/unit tests in the `RAG_Challenge.Tests` project
 private const string OpenAiApiKey = "PLACEHOLDER"; // Replace with actual key
 private const string VectorDbApiKey = "PLACEHOLDER"; // Replace with actual key
 ```
+
+> **Note:** Similar to the launch settings, I am aware that hardcoding keys is not best practice. I opted for this manual replacement in the test file to make it straightforward for reviewers to plug in keys and run the `RealFlow` tests without additional environment configuration.
 
 ### Making Requests
 
@@ -226,6 +230,8 @@ Atualize o perfil `http` para incluir as variáveis de ambiente necessárias, co
 }
 ```
 
+> **Nota:** Estou ciente de que o uso de "user secrets" ou variáveis de ambiente é a prática padrão para proteger chaves. Escolhi este método de substituição manual no `launchSettings.json` puramente para simplificar o processo de configuração para os revisores, evitando a necessidade de etapas de configuração externa.
+
 ### Executando Testes
 
 O projeto inclui testes de integração/unidade no projeto `RAG_Challenge.Tests`.
@@ -236,6 +242,8 @@ O projeto inclui testes de integração/unidade no projeto `RAG_Challenge.Tests`
 private const string OpenAiApiKey = "PLACEHOLDER"; // Substitua pela chave real
 private const string VectorDbApiKey = "PLACEHOLDER"; // Substitua pela chave real
 ```
+
+> **Nota:** Assim como nas configurações de execução, estou ciente de que deixar chaves no código não é a melhor prática. Optei por essa substituição manual no arquivo de teste para tornar direto para os revisores inserirem as chaves e rodarem os testes `RealFlow` sem configuração adicional de ambiente.
 
 ### Fazendo Requisições
 
