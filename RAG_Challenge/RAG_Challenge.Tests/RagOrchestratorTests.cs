@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using RAG_Challenge.Application.Orchestration;
+using RAG_Challenge.Application.Services;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Domain.Models.Chat;
 using RAG_Challenge.Domain.Models.Embeddings;
@@ -27,6 +28,7 @@ public class RagOrchestratorTests
 
     private readonly Mock<IOpenAiClient> _openAiMock;
     private readonly Mock<IVectorDbClient> _vectorDbMock;
+    private readonly Mock<ICoverageJudgeService> _judgeMock;
     private readonly Mock<ILogger<RagOrchestrator>> _loggerMock;
     private readonly RagOrchestrator _orchestrator;
 
@@ -34,11 +36,13 @@ public class RagOrchestratorTests
     {
         _openAiMock = new Mock<IOpenAiClient>();
         _vectorDbMock = new Mock<IVectorDbClient>();
+        _judgeMock = new Mock<ICoverageJudgeService>();
         _loggerMock = new Mock<ILogger<RagOrchestrator>>();
 
         _orchestrator = new RagOrchestrator(
             _openAiMock.Object,
             _vectorDbMock.Object,
+            _judgeMock.Object,
             _loggerMock.Object);
     }
 
@@ -67,16 +71,9 @@ public class RagOrchestratorTests
             .ReturnsAsync(Result<IReadOnlyList<VectorDbSearchResult>>.Success(searchResults));
 
         // Simular Coverage Judge para retornar YES
-        _openAiMock.Setup(x => x.CreateChatCompletionAsync(
-                It.Is<IReadOnlyList<ChatMessage>>(m => m.Any(msg => msg.Content.Contains("You are a coverage judge"))),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatCompletionResponse>.Success(new ChatCompletionResponse(
-                "chatcmpl-123",
-                "chat.completion",
-                1234567890,
-                "gpt-4",
-                [new ChatChoice(new ChatMessage("assistant", "YES"), "stop")]
-            )));
+        _judgeMock.Setup(x =>
+                x.EvaluateCoverageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<(bool, string?)>.Success((false, null)));
 
         // Simular Resposta Final
         var answerJson = "{\"answer\": \"Tesla is a car company.\", \"handoverToHumanNeeded\": false}";
@@ -125,10 +122,12 @@ public class RagOrchestratorTests
             new OpenAiHttpClient(openAiHttpClient, openAiOptions, new Mock<ILogger<OpenAiHttpClient>>().Object);
         var vectorDbClient = new VectorDbHttpClient(vectorDbHttpClient, vectorDbOptions,
             new Mock<ILogger<VectorDbHttpClient>>().Object);
+        var judgeService = new CoverageJudgeService(openAiClient);
 
         var orchestrator = new RagOrchestrator(
             openAiClient,
             vectorDbClient,
+            judgeService,
             _loggerMock.Object);
 
         var question = "What is a Tesla?";
@@ -168,16 +167,9 @@ public class RagOrchestratorTests
             .ReturnsAsync(Result<IReadOnlyList<VectorDbSearchResult>>.Success(searchResults));
 
         // Simular Coverage Judge para retornar NO
-        _openAiMock.Setup(x => x.CreateChatCompletionAsync(
-                It.Is<IReadOnlyList<ChatMessage>>(m => m.Any(msg => msg.Content.Contains("You are a coverage judge"))),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatCompletionResponse>.Success(new ChatCompletionResponse(
-                "chatcmpl-125",
-                "chat.completion",
-                1234567890,
-                "gpt-4",
-                [new ChatChoice(new ChatMessage("assistant", "NO: I can't find the answer."), "stop")]
-            )));
+        _judgeMock.Setup(x =>
+                x.EvaluateCoverageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<(bool, string?)>.Success((true, "I can't find the answer.")));
 
         // Passo 1: Primeira chamada
         var request1 = new RagRequest(question, [], Projects.TeslaMotorsId);
@@ -240,10 +232,12 @@ public class RagOrchestratorTests
             new OpenAiHttpClient(openAiHttpClient, openAiOptions, new Mock<ILogger<OpenAiHttpClient>>().Object);
         var vectorDbClient = new VectorDbHttpClient(vectorDbHttpClient, vectorDbOptions,
             new Mock<ILogger<VectorDbHttpClient>>().Object);
+        var judgeService = new CoverageJudgeService(openAiClient);
 
         var orchestrator = new RagOrchestrator(
             openAiClient,
             vectorDbClient,
+            judgeService,
             _loggerMock.Object);
 
         var question = "What is the capital of France?";

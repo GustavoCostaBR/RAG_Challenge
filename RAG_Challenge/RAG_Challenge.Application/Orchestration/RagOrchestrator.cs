@@ -13,6 +13,7 @@ namespace RAG_Challenge.Application.Orchestration;
 internal sealed class RagOrchestrator(
     IOpenAiClient openAi,
     IVectorDbClient vectorDb,
+    ICoverageJudgeService judgeService,
     ILogger<RagOrchestrator> logger)
     : IRagOrchestrator
 {
@@ -76,7 +77,7 @@ internal sealed class RagOrchestrator(
         }
 
         var contextChunk = GetContextChunkString(retrievedContext);
-        var coverageEvaluationResult = await EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
+        var coverageEvaluationResult = await judgeService.EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
 
         if (!coverageEvaluationResult.IsSuccess)
         {
@@ -212,7 +213,7 @@ internal sealed class RagOrchestrator(
 
         while (true)
         {
-            var chatResult = await ExecuteWithRetryAsync(
+            var chatResult = await RetryHelper.ExecuteWithRetryAsync(
                 () => openAi.CreateChatCompletionAsync(messages, cancellationToken),
                 maxRetries: MaximumRetryCount,
                 cancellationToken);
@@ -305,81 +306,5 @@ internal sealed class RagOrchestrator(
         };
         return new ChatOrchestrationResult(escalationAnswer, embedding, retrieved, null, returnedHistoryEscalate,
             handoverToHuman, Status.Ok());
-    }
-
-    private async Task<Result<(bool NeedClarification, string? ClarificationPrompt)>> EvaluateCoverageAsync(
-        string question,
-        string context,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(context))
-        {
-            return Result<(bool, string?)>.Failure("No context retrieved from Vector DB");
-        }
-
-        var judgeMessages = new List<ChatMessage>
-        {
-            new(RoleConstants.SystemRole, RagPrompts.CoverageJudgeSystemPrompt),
-            new(RoleConstants.UserRole, $"Question: {question}\n\nContext:\n{context}")
-        };
-
-        var judgeResult = await ExecuteWithRetryAsync(
-            () => openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken),
-            maxRetries: MaximumRetryCount,
-            cancellationToken);
-
-        if (!judgeResult.IsSuccess)
-        {
-            return Result<(bool, string?)>.Failure(judgeResult.Status);
-        }
-
-        var chatResponse = judgeResult.Value;
-        var firstResult = chatResponse is { Choices.Count: > 0 } ? chatResponse.Choices[0] : null;
-
-        var judgeText = firstResult?.Message.Content;
-
-        if (string.IsNullOrWhiteSpace(judgeText))
-        {
-            return Result<(bool, string?)>.Failure("No response from Coverage Judge");
-        }
-
-        judgeText = judgeText.Trim();
-
-        if (judgeText.StartsWith("NO", true, CultureInfo.InvariantCulture))
-        {
-            var clarification = judgeText.Length > 2 ? judgeText[2..].TrimStart(':', ' ', '\t') : null;
-
-            return string.IsNullOrWhiteSpace(clarification)
-                ? Result<(bool, string?)>.Failure("Coverage Judge returned NO but provided no clarification")
-                : Result<(bool, string?)>.Success((true, clarification));
-        }
-
-        return judgeText.StartsWith("YES", true, CultureInfo.InvariantCulture)
-            ? Result<(bool, string?)>.Success((false, null))
-            : Result<(bool, string?)>.Failure($"Unexpected response from Coverage Judge: {judgeText}");
-    }
-
-    private static async Task<Result<T>> ExecuteWithRetryAsync<T>(
-        Func<Task<Result<T>>> action,
-        int maxRetries,
-        CancellationToken cancellationToken)
-    {
-        var result = Result<T>.Failure("Operation not executed");
-
-        for (var i = 0; i <= maxRetries; i++)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                return Result<T>.Failure("Operation cancelled");
-            }
-
-            result = await action();
-            if (result.IsSuccess)
-            {
-                return result;
-            }
-        }
-
-        return result;
     }
 }
