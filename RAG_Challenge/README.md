@@ -108,6 +108,9 @@ The API accepts POST requests to the endpoint `/api/rag`. Here is an example req
 
 **Endpoint:** `POST http://localhost:8080/rag/ask` (Docker) or `POST http://localhost:5187/rag/ask` (IDE)
 
+**Native IDE Support (.http)**
+If you are using JetBrains Rider or Visual Studio, you can use the file `RAG_Challenge/RAG_Challenge.http` to test the API directly within the IDE, without needing external tools like Postman.
+
 **Request Body:**
 ```json
 {
@@ -251,6 +254,9 @@ private const string VectorDbApiKey = "PLACEHOLDER"; // Substitua pela chave rea
 A API aceita requisições POST para o endpoint `/api/rag`. Aqui está um exemplo de requisição no Postman:
 
 **Endpoint:** `POST http://localhost:8080/rag/ask` (Docker) ou `POST http://localhost:5187/rag/ask` (IDE)
+
+**Suporte Nativo da IDE (.http)**
+Se você estiver usando JetBrains Rider ou Visual Studio, pode usar o arquivo `RAG_Challenge/RAG_Challenge.http` para testar a API diretamente na IDE, sem precisar de ferramentas externas como Postman.
 
 **Corpo da Requisição:**
 ```json
