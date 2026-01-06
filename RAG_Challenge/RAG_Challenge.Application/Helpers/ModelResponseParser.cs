@@ -1,7 +1,7 @@
 using System.Text.Json;
 using RAG_Challenge.Domain.Models.Rag;
 
-namespace RAG_Challenge.Infrastructure.Helpers;
+namespace RAG_Challenge.Application.Helpers;
 
 public static class ModelResponseParser
 {
@@ -47,4 +47,3 @@ public static class ModelResponseParser
         }
     }
 }
-

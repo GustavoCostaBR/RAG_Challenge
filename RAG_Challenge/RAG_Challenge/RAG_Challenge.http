@@ -1,6 +1,15 @@
-@RAG_Challenge_HostAddress = http://localhost:5187
+//Usado para testar a API RAG Challenge
 
-GET {{RAG_Challenge_HostAddress}}/weatherforecast/
+@RAG_Challenge_HostAddress = http://localhost:8080
+
+POST {{RAG_Challenge_HostAddress}}/rag/ask
+Content-Type: application/json
 Accept: application/json
+
+{
+  "question": "What is Tesla Model S topspeed?",
+  "history": [],
+  "projectId": "0a52b428-e00b-4f16-af14-98404f17fab7"
+}
 
 ###

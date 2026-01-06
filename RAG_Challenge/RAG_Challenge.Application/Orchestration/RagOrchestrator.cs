@@ -1,24 +1,21 @@
-using System.Globalization;
 using Microsoft.Extensions.Logging;
+using RAG_Challenge.Application.Helpers;
 using RAG_Challenge.Domain.Constants;
 using RAG_Challenge.Domain.Contracts;
 using RAG_Challenge.Domain.Models.Chat;
 using RAG_Challenge.Domain.Models.Embeddings;
 using RAG_Challenge.Domain.Models.Rag;
 using RAG_Challenge.Domain.Models.VectorSearch;
-using RAG_Challenge.Infrastructure.Helpers;
 
-namespace RAG_Challenge.Infrastructure.Orchestration;
+namespace RAG_Challenge.Application.Orchestration;
 
 internal sealed class RagOrchestrator(
     IOpenAiClient openAi,
     IVectorDbClient vectorDb,
+    ICoverageJudgeService judgeService,
     ILogger<RagOrchestrator> logger)
     : IRagOrchestrator
 {
-    private const string ClarificationTag = "[clarification]";
-
-
     // Nao se refere ao numero maximo de tentativas, mas sim ao numero maximo de tentativas para cada um dos problemas
     // No pior caso, no cenahrio que temos que escalar porque o content type é N2, o modelo fica um pouco mais lento (estamos falando de O(N²))
     // Por causa das retentativas, mas é aceitavel considerando que é um cenário que deve ser raro e buscamos estabilidade
@@ -79,7 +76,8 @@ internal sealed class RagOrchestrator(
         }
 
         var contextChunk = GetContextChunkString(retrievedContext);
-        var coverageEvaluationResult = await EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
+        var coverageEvaluationResult =
+            await judgeService.EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
 
         if (!coverageEvaluationResult.IsSuccess)
         {
@@ -98,9 +96,13 @@ internal sealed class RagOrchestrator(
 
         if (heuristicClarify || judgeClarify)
         {
+            logger.LogInformation(
+                "Clarification needed. Heuristic: {Heuristic}, Judge: {Judge}, JudgePrompt: {JudgePrompt}",
+                heuristicClarify, judgeClarify, judgePrompt);
             return HandleClarification(request, embedding, retrievedContext, judgePrompt);
         }
 
+        logger.LogInformation("Generating final answer with context.");
         return await GenerateFinalAnswerAsync(request, embedding, retrievedContext, contextChunk, cancellationToken);
     }
 
@@ -139,11 +141,10 @@ internal sealed class RagOrchestrator(
             return Result<IReadOnlyList<VectorDbSearchResult>>.Failure(searchRequestResult.Status);
         }
 
-        var retrievedContext = await vectorDb.SearchAsync(searchRequestResult.Value!, cancellationToken);
-        return Result<IReadOnlyList<VectorDbSearchResult>>.Success(retrievedContext);
+        return await vectorDb.SearchAsync(searchRequestResult.Value!, cancellationToken);
     }
 
-    private static ChatOrchestrationResult HandleClarification(
+    private ChatOrchestrationResult HandleClarification(
         RagRequest request,
         EmbeddingResponse embedding,
         IReadOnlyList<VectorDbSearchResult> retrievedContext,
@@ -156,7 +157,7 @@ internal sealed class RagOrchestrator(
             return ReturnEscalationAnswer(request, request.History, embedding, retrievedContext, true);
         }
 
-        var clarificationPrompt = ClarificationTag + " " + judgePrompt;
+        var clarificationPrompt = FlowConstants.ClarificationTag + " " + judgePrompt;
         var returnedHistoryClarify = new List<ChatMessage>(request.History)
         {
             new(RoleConstants.UserRole, request.Question),
@@ -211,12 +212,12 @@ internal sealed class RagOrchestrator(
         CancellationToken cancellationToken)
     {
         var attempt = 0;
-        
+
         var isAnyContentLabelledN2 = RagHeuristicsHelper.IsAnyRetrievedContextLabelledN2(retrievedContext);
 
         while (true)
         {
-            var chatResult = await ExecuteWithRetryAsync(
+            var chatResult = await RetryHelper.ExecuteWithRetryAsync(
                 () => openAi.CreateChatCompletionAsync(messages, cancellationToken),
                 maxRetries: MaximumRetryCount,
                 cancellationToken);
@@ -294,13 +295,14 @@ internal sealed class RagOrchestrator(
         }
     }
 
-    private static ChatOrchestrationResult ReturnEscalationAnswer(
+    private ChatOrchestrationResult ReturnEscalationAnswer(
         RagRequest request,
         IReadOnlyList<ChatMessage> history,
         EmbeddingResponse? embedding,
         IReadOnlyList<VectorDbSearchResult> retrieved,
         bool handoverToHuman)
     {
+        logger.LogInformation("Escalating to human. HandoverNeeded: {Handover}", handoverToHuman);
         const string escalationAnswer = "I need to hand this over to a human specialist for further assistance.";
         var returnedHistoryEscalate = new List<ChatMessage>(history)
         {
@@ -309,81 +311,5 @@ internal sealed class RagOrchestrator(
         };
         return new ChatOrchestrationResult(escalationAnswer, embedding, retrieved, null, returnedHistoryEscalate,
             handoverToHuman, Status.Ok());
-    }
-
-    private async Task<Result<(bool NeedClarification, string? ClarificationPrompt)>> EvaluateCoverageAsync(
-        string question,
-        string context,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(context))
-        {
-            return Result<(bool, string?)>.Failure("No context retrieved from Vector DB");
-        }
-
-        var judgeMessages = new List<ChatMessage>
-        {
-            new(RoleConstants.SystemRole, RagPrompts.CoverageJudgeSystemPrompt),
-            new(RoleConstants.UserRole, $"Question: {question}\n\nContext:\n{context}")
-        };
-
-        var judgeResult = await ExecuteWithRetryAsync(
-            () => openAi.CreateChatCompletionAsync(judgeMessages, cancellationToken),
-            maxRetries: MaximumRetryCount,
-            cancellationToken);
-
-        if (!judgeResult.IsSuccess)
-        {
-            return Result<(bool, string?)>.Failure(judgeResult.Status);
-        }
-
-        var chatResponse = judgeResult.Value;
-        var firstResult = chatResponse is { Choices.Count: > 0 } ? chatResponse.Choices[0] : null;
-
-        var judgeText = firstResult?.Message.Content;
-
-        if (string.IsNullOrWhiteSpace(judgeText))
-        {
-            return Result<(bool, string?)>.Failure("No response from Coverage Judge");
-        }
-
-        judgeText = judgeText.Trim();
-
-        if (judgeText.StartsWith("NO", true, CultureInfo.InvariantCulture))
-        {
-            var clarification = judgeText.Length > 2 ? judgeText[2..].TrimStart(':', ' ', '\t') : null;
-
-            return string.IsNullOrWhiteSpace(clarification)
-                ? Result<(bool, string?)>.Failure("Coverage Judge returned NO but provided no clarification")
-                : Result<(bool, string?)>.Success((true, clarification));
-        }
-
-        return judgeText.StartsWith("YES", true, CultureInfo.InvariantCulture)
-            ? Result<(bool, string?)>.Success((false, null))
-            : Result<(bool, string?)>.Failure($"Unexpected response from Coverage Judge: {judgeText}");
-    }
-
-    private static async Task<Result<T>> ExecuteWithRetryAsync<T>(
-        Func<Task<Result<T>>> action,
-        int maxRetries,
-        CancellationToken cancellationToken)
-    {
-        var result = Result<T>.Failure("Operation not executed");
-
-        for (var i = 0; i <= maxRetries; i++)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                return Result<T>.Failure("Operation cancelled");
-            }
-
-            result = await action();
-            if (result.IsSuccess)
-            {
-                return result;
-            }
-        }
-
-        return result;
     }
 }

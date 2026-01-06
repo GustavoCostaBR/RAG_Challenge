@@ -22,7 +22,7 @@ To build and run the application using Docker, follow these steps from the root 
     ```
 
 2.  **Run the container:**
-    
+
     You need to provide the necessary environment variables. Replace the placeholders with your actual API keys.
 
     ```bash
@@ -87,9 +87,11 @@ Update the `http` profile to include the required environment variables as shown
 }
 ```
 
+> **Note:** I am aware that using user secrets or environment variables is the standard practice for securing keys. I chose this manual replacement method in `launchSettings.json` purely to simplify the setup process for reviewers, avoiding the need for external configuration steps.
+
 ### Running Tests
 
-The project includes integration/unit tests in the `RAG_Challenge.Tests` project. 
+The project includes integration/unit tests in the `RAG_Challenge.Tests` project.
 
 **Important:** The tests require valid API keys to run successfully against the real services (in the "RealFlow" tests). You must manually replace the placeholders in `RagOrchestratorTests.cs` with your actual keys before running them.
 
@@ -98,11 +100,16 @@ private const string OpenAiApiKey = "PLACEHOLDER"; // Replace with actual key
 private const string VectorDbApiKey = "PLACEHOLDER"; // Replace with actual key
 ```
 
+> **Note:** Similar to the launch settings, I am aware that hardcoding keys is not best practice. I opted for this manual replacement in the test file to make it straightforward for reviewers to plug in keys and run the `RealFlow` tests without additional environment configuration.
+
 ### Making Requests
 
 The API accepts POST requests to the endpoint `/api/rag`. Here is an example request you can use in Postman or curl:
 
 **Endpoint:** `POST http://localhost:8080/rag/ask` (Docker) or `POST http://localhost:5187/rag/ask` (IDE)
+
+**Native IDE Support (.http)**
+If you are using JetBrains Rider or Visual Studio, you can use the file `RAG_Challenge/RAG_Challenge.http` to test the API directly within the IDE, without needing external tools like Postman.
 
 **Request Body:**
 ```json
@@ -144,6 +151,7 @@ The API accepts POST requests to the endpoint `/api/rag`. Here is an example req
 *   **Clarification Tagging:** For simplicity, clarification requests are marked with a `[clarification]` string tag in the response. This allows for easy parsing by the client, though a more structured approach (e.g., a specific JSON field) could be considered for the future.
 *   **Scope:** Security/authentication implementation and extensive logging were considered out of scope for this challenge to prioritize the core RAG logic and feature implementation. I've used just http for the same reason, simplicity.
 *   **Stateless Logic Refactoring:** Components that handle pure logic without side effects (like `RagHeuristicsHelper`, `ModelResponseParser`, and `VectorSearchBuilder`) were refactored into static helper classes. This decision was made because this logic should not clutter the main orchestration flow, and these components did not maintain any state (class variables) that would justify non-static classes.
+*   **Logging Strategy:** I decided not to include third-party logging libraries like Serilog to keep dependencies minimal. However, I implemented comprehensive logging using `Microsoft.Extensions.Logging` throughout the application (especially in the Orchestrator, Coverage Judge, and HTTP clients). This decision was made to allow fast debugging of non-deterministic behavior (like hallucinations or heuristic triggers) without needing to re-run complex scenarios repeatedly, as some issues might be transient.
 
 ---
 
@@ -162,7 +170,7 @@ Para compilar e executar a aplicação usando Docker, siga estes passos a partir
     ```
 
 2.  **Executar o container:**
-    
+
     Você precisa fornecer as variáveis de ambiente necessárias. Substitua os placeholders pelas suas chaves de API reais.
 
     ```bash
@@ -226,6 +234,8 @@ Atualize o perfil `http` para incluir as variáveis de ambiente necessárias, co
 }
 ```
 
+> **Nota:** Estou ciente de que o uso de "user secrets" ou variáveis de ambiente é a prática padrão para proteger chaves. Escolhi este método de substituição manual no `launchSettings.json` puramente para simplificar o processo de configuração para os revisores, evitando a necessidade de etapas de configuração externa.
+
 ### Executando Testes
 
 O projeto inclui testes de integração/unidade no projeto `RAG_Challenge.Tests`.
@@ -237,11 +247,16 @@ private const string OpenAiApiKey = "PLACEHOLDER"; // Substitua pela chave real
 private const string VectorDbApiKey = "PLACEHOLDER"; // Substitua pela chave real
 ```
 
+> **Nota:** Assim como nas configurações de execução, estou ciente de que deixar chaves no código não é a melhor prática. Optei por essa substituição manual no arquivo de teste para tornar direto para os revisores inserirem as chaves e rodarem os testes `RealFlow` sem configuração adicional de ambiente.
+
 ### Fazendo Requisições
 
 A API aceita requisições POST para o endpoint `/api/rag`. Aqui está um exemplo de requisição no Postman:
 
 **Endpoint:** `POST http://localhost:8080/rag/ask` (Docker) ou `POST http://localhost:5187/rag/ask` (IDE)
+
+**Suporte Nativo da IDE (.http)**
+Se você estiver usando JetBrains Rider ou Visual Studio, pode usar o arquivo `RAG_Challenge/RAG_Challenge.http` para testar a API diretamente na IDE, sem precisar de ferramentas externas como Postman.
 
 **Corpo da Requisição:**
 ```json
@@ -291,3 +306,4 @@ A API aceita requisições POST para o endpoint `/api/rag`. Aqui está um exempl
 *   **Tagueamento de Esclarecimento:** Para simplicidade, os pedidos de esclarecimento são marcados com uma tag de string `[clarification]` na resposta. Isso permite uma fácil análise pelo cliente, embora uma abordagem mais estruturada (por exemplo, um campo JSON específico) possa ser considerada para o futuro.
 *   **Escopo:** A implementação de segurança/autenticação e o registro (log) extensivo foram considerados fora do escopo deste desafio para priorizar a lógica central do RAG e a implementação de recursos. Pela mesma razão implementei apenas http, para simplicidade.
 *   **Refatoração de Lógica Sem Estado:** Componentes que lidam com lógica pura sem considerar estado (como `RagHeuristicsHelper`, `ModelResponseParser` e `VectorSearchBuilder`) foram refatorados em classes auxiliares estáticas. Essa decisão foi tomada porque essa lógica não deveria poluir o fluxo principal de orquestração, e esses componentes não mantinham nenhum estado (variáveis de classe) que justificasse classes não estáticas.
+*   **Estratégia de Log:** Decidi não incluir bibliotecas de log de terceiros como Serilog para manter as dependências mínimas. No entanto, implementei logs abrangentes usando `Microsoft.Extensions.Logging` em toda a aplicação (especialmente no Orchestrator, Coverage Judge e clientes HTTP). Essa decisão foi tomada para permitir a depuração rápida de comportamentos não determinísticos (como alucinações ou acionadores heurísticos) sem a necessidade de reexecutar cenários complexos repetidamente, já que alguns problemas podem ser transitórios.

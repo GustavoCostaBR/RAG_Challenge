@@ -49,7 +49,8 @@ appsettings.*.local.json
 # Coverage
 *.coverage
 *.coveragexml
-coverage*
+coverage/
+coverage.*
 TestResult*
 
 # Publish outputs
