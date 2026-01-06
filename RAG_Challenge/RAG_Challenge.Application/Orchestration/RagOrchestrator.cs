@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.Extensions.Logging;
 using RAG_Challenge.Application.Helpers;
 using RAG_Challenge.Domain.Constants;
@@ -77,7 +76,8 @@ internal sealed class RagOrchestrator(
         }
 
         var contextChunk = GetContextChunkString(retrievedContext);
-        var coverageEvaluationResult = await judgeService.EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
+        var coverageEvaluationResult =
+            await judgeService.EvaluateCoverageAsync(request.Question, contextChunk, cancellationToken);
 
         if (!coverageEvaluationResult.IsSuccess)
         {
