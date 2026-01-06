@@ -96,9 +96,13 @@ internal sealed class RagOrchestrator(
 
         if (heuristicClarify || judgeClarify)
         {
+            logger.LogInformation(
+                "Clarification needed. Heuristic: {Heuristic}, Judge: {Judge}, JudgePrompt: {JudgePrompt}",
+                heuristicClarify, judgeClarify, judgePrompt);
             return HandleClarification(request, embedding, retrievedContext, judgePrompt);
         }
 
+        logger.LogInformation("Generating final answer with context.");
         return await GenerateFinalAnswerAsync(request, embedding, retrievedContext, contextChunk, cancellationToken);
     }
 
@@ -140,7 +144,7 @@ internal sealed class RagOrchestrator(
         return await vectorDb.SearchAsync(searchRequestResult.Value!, cancellationToken);
     }
 
-    private static ChatOrchestrationResult HandleClarification(
+    private ChatOrchestrationResult HandleClarification(
         RagRequest request,
         EmbeddingResponse embedding,
         IReadOnlyList<VectorDbSearchResult> retrievedContext,
@@ -291,13 +295,14 @@ internal sealed class RagOrchestrator(
         }
     }
 
-    private static ChatOrchestrationResult ReturnEscalationAnswer(
+    private ChatOrchestrationResult ReturnEscalationAnswer(
         RagRequest request,
         IReadOnlyList<ChatMessage> history,
         EmbeddingResponse? embedding,
         IReadOnlyList<VectorDbSearchResult> retrieved,
         bool handoverToHuman)
     {
+        logger.LogInformation("Escalating to human. HandoverNeeded: {Handover}", handoverToHuman);
         const string escalationAnswer = "I need to hand this over to a human specialist for further assistance.";
         var returnedHistoryEscalate = new List<ChatMessage>(history)
         {

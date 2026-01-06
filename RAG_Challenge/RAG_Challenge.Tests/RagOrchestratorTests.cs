@@ -122,7 +122,7 @@ public class RagOrchestratorTests
             new OpenAiHttpClient(openAiHttpClient, openAiOptions, new Mock<ILogger<OpenAiHttpClient>>().Object);
         var vectorDbClient = new VectorDbHttpClient(vectorDbHttpClient, vectorDbOptions,
             new Mock<ILogger<VectorDbHttpClient>>().Object);
-        var judgeService = new CoverageJudgeService(openAiClient);
+        var judgeService = new CoverageJudgeService(openAiClient, new Mock<ILogger<CoverageJudgeService>>().Object);
 
         var orchestrator = new RagOrchestrator(
             openAiClient,
@@ -232,7 +232,7 @@ public class RagOrchestratorTests
             new OpenAiHttpClient(openAiHttpClient, openAiOptions, new Mock<ILogger<OpenAiHttpClient>>().Object);
         var vectorDbClient = new VectorDbHttpClient(vectorDbHttpClient, vectorDbOptions,
             new Mock<ILogger<VectorDbHttpClient>>().Object);
-        var judgeService = new CoverageJudgeService(openAiClient);
+        var judgeService = new CoverageJudgeService(openAiClient, new Mock<ILogger<CoverageJudgeService>>().Object);
 
         var orchestrator = new RagOrchestrator(
             openAiClient,
